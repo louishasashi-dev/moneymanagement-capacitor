@@ -2236,3 +2236,78 @@ input[type="number"]::-webkit-outer-spin-button {
     transform: none;
   }
 }
+
+/* ===== Modal aman di Android (safe-area + tinggi dinamis) =====
+   Masalah: di WebView Android edge-to-edge, bagian bawah modal tertutup bar
+   navigasi sistem karena (1) env(safe-area-inset-*) bernilai 0 di WebView lama
+   (Capacitor 8 mode "css" hanya mengisi --safe-area-inset-*) dan (2) tinggi modal
+   memakai vh yang lebih besar daripada area terlihat.
+   Perbaikan terpusat: satu token inset + satu layer yang menimpa modal lama tanpa
+   mengubah file JS tiap modal. @layer + !important mengalahkan semua style modal
+   yang diinjeksi JS (urutan/specificity tidak berpengaruh). Di desktop inset = 0
+   sehingga tampilan tidak berubah. */
+:root {
+  --mm-safe-top: max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px));
+  --mm-safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px));
+}
+
+@layer mm-modal-safe {
+  /* Footer sheet: tombol aksi selalu di atas bar navigasi sistem; latar footer
+     tetap memanjang sampai tepi bawah layar. */
+  .mx-foot {
+    padding-bottom: calc(16px + var(--mm-safe-bottom)) !important;
+  }
+  .debt-modal .dm-footer {
+    padding-bottom: calc(20px + var(--mm-safe-bottom)) !important;
+  }
+
+  /* Modal di tengah layar (bukan bottom sheet): tetap di dalam area aman dan
+     dapat di-scroll jika lebih tinggi dari layar. */
+  .modal-overlay:not(.tx-sheet-overlay) > .modal-container:not(.debt-modal) {
+    box-sizing: border-box !important;
+    margin-top: var(--mm-safe-top) !important;
+    margin-bottom: var(--mm-safe-bottom) !important;
+    max-height: min(80dvh, calc(100dvh - var(--mm-safe-top) - var(--mm-safe-bottom) - 24px)) !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+  }
+  .modal-overlay:not(.tx-sheet-overlay) > .modal-container[style*="max-height"] {
+    max-height: min(90dvh, calc(100dvh - var(--mm-safe-top) - var(--mm-safe-bottom) - 24px)) !important;
+  }
+  .modal-overlay.tx-detail-overlay > .modal-container.tx-detail {
+    max-height: min(86dvh, calc(100dvh - var(--mm-safe-top) - var(--mm-safe-bottom) - 32px)) !important;
+  }
+
+  /* Bottom sheet kecil di pengaturan (backup / CSV): inline style, tanpa class */
+  #backup-overlay > div,
+  #csv-overlay > div {
+    box-sizing: border-box !important;
+    padding-bottom: calc(36px + var(--mm-safe-bottom)) !important;
+    max-height: calc(100dvh - var(--mm-safe-top) - 8px) !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+  }
+
+  @media (max-width: 768px), (max-height: 520px) and (pointer: coarse) {
+    /* Bottom sheet: tinggi dinamis (dvh) dan tidak masuk ke area status bar */
+    .mx-sheet {
+      max-height: min(94dvh, calc(100dvh - var(--mm-safe-top) - 8px)) !important;
+    }
+    .modal-container.tx-sheet {
+      max-height: min(88dvh, calc(100dvh - var(--mm-safe-top) - 8px)) !important;
+    }
+    .modal-container.tx-sheet .tx-sheet-footer {
+      padding-bottom: calc(28px + var(--mm-safe-bottom)) !important;
+    }
+    .mx-body,
+    .modal-container.tx-sheet .tx-sheet-scroll {
+      overscroll-behavior: contain;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .modal-container.debt-modal {
+      max-height: min(94dvh, calc(100dvh - var(--mm-safe-top) - 8px)) !important;
+    }
+  }
+}

@@ -20,3 +20,26 @@ const vector = `<?xml version="1.0" encoding="utf-8"?>
 `;
 fs.writeFileSync(target, vector, "utf8");
 console.log("Prepared Android notification icon.");
+
+// Izin yang dibutuhkan notifikasi lokal. Android 13+ butuh POST_NOTIFICATIONS agar
+// dialog izin bisa muncul; RECEIVE_BOOT_COMPLETED agar jadwal dipulihkan setelah
+// perangkat restart. Ditambahkan hanya jika belum ada (aman dijalankan berulang;
+// deklarasi ganda dari plugin digabung otomatis oleh manifest merger).
+const manifestPath = path.resolve("android/app/src/main/AndroidManifest.xml");
+if (fs.existsSync(manifestPath)) {
+  let manifest = fs.readFileSync(manifestPath, "utf8");
+  const missing = [
+    "android.permission.POST_NOTIFICATIONS",
+    "android.permission.RECEIVE_BOOT_COMPLETED",
+  ].filter((name) => !manifest.includes(`android:name="${name}"`));
+  if (missing.length && manifest.includes("</manifest>")) {
+    const lines = missing
+      .map((name) => `    <uses-permission android:name="${name}" />\n`)
+      .join("");
+    manifest = manifest.replace("</manifest>", `${lines}</manifest>`);
+    fs.writeFileSync(manifestPath, manifest, "utf8");
+  }
+  console.log("Prepared Android notification permissions.");
+} else {
+  console.warn("AndroidManifest.xml tidak ditemukan; izin notifikasi tidak ditambahkan.");
+}

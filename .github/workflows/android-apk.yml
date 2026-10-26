@@ -41,6 +41,8 @@ jobs:
         run: npx cap add android
       - name: Prepare notification status icon
         run: node scripts/prepare-android.js
+      - name: Generate launcher icons from images/icons
+        run: node scripts/prepare-android-icons.js
       - name: Sync Capacitor plugins and assets
         run: npx cap sync android
       - name: Build debug APK

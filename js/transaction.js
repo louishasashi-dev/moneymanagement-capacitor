@@ -2306,7 +2306,10 @@ export function saveMultiTransactionAtomic(record, oldRecord) {
         const walletStore = tx.objectStore(STORES.WALLETS);
         let outcome = { ok: false, error: "aborted" };
 
-        tx.oncomplete = () => resolve({ ok: true });
+        tx.oncomplete = () => {
+          window.dispatchEvent(new Event("money-manager-data-changed"));
+          resolve({ ok: true });
+        };
         tx.onabort = () => resolve(outcome);
 
         (async () => {

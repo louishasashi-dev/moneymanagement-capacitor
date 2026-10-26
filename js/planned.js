@@ -418,6 +418,8 @@ async function confirmPlanned(id) {
   // Tandai planned sebagai confirmed
   item.status = "confirmed";
   await plannedUpdate(item);
+  // Transaksi baru tercatat: perbarui jadwal pengingat Android.
+  window.dispatchEvent(new Event("money-manager-data-changed"));
 
   showToast("Transaksi berhasil dikonfirmasi dan disimpan!", "success");
   await renderPlannedView();
