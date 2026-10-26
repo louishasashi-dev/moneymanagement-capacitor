@@ -1,0 +1,22 @@
+{
+  "name": "money-manager-capacitor",
+  "version": "1.2.0",
+  "private": true,
+  "description": "Money Manager PWA packaged as an Android app with Capacitor",
+  "scripts": {
+    "prepare:web": "node scripts/prepare-public.js",
+    "build": "npm run prepare:web && vite build",
+    "cap:sync": "npx cap sync android",
+    "android:open": "npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/local-notifications": "^8.3.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
+    "vite": "^7.1.0"
+  },
+  "type": "module"
+}

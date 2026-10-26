@@ -1,0 +1,8 @@
+node_modules/
+www/
+public/
+android/
+.DS_Store
+*.log
+# Personal local exports/backups: do not commit financial data.
+backupdata/

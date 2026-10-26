@@ -1,0 +1,754 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'"
+    />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#1a1a2e" />
+    <title>Money Manager - Keuangan Harian</title>
+
+    <!-- Favicon menggunakan logo yang sudah ada -->
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="512x512"
+      href="images/logo/logo.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="192x192"
+      href="images/logo/logo.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="32x32"
+      href="images/logo/logo.png"
+    />
+    <link rel="shortcut icon" href="images/logo/logo.png" type="image/png" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="apple-touch-icon" href="images/icons/icon-192x192.png" />
+
+    <!-- CSS Files -->
+    <link rel="stylesheet" href="css/style.css" />
+
+    <!-- Bottom bar mobile: mengambang + indikator "bulan" yang bergeser antar halaman.
+         Ditaruh setelah style.css supaya menimpa gaya bottom-nav lama. -->
+    <style id="floating-bottom-nav">
+      @property --notch-x {
+        syntax: "<length>";
+        inherits: true;
+        initial-value: -200px;
+      }
+
+      .bottom-nav-bubble {
+        display: none;
+      }
+
+      @media (max-width: 768px) {
+        body .bottom-nav {
+          --notch-x: -200px;
+          position: fixed !important;
+          left: 12px !important;
+          right: 12px !important;
+          bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+          width: auto !important;
+          height: 66px !important;
+          margin: 0 !important;
+          padding: 0 6px !important;
+          display: flex !important;
+          align-items: stretch;
+          justify-content: space-between;
+          background: transparent !important;
+          border: 0 !important;
+          border-radius: 28px !important;
+          box-shadow: none !important;
+          -webkit-backdrop-filter: none !important;
+          backdrop-filter: none !important;
+          filter: drop-shadow(0 8px 18px rgba(30, 40, 90, 0.2));
+          overflow: visible !important;
+        }
+        body .bottom-nav.nav-ready {
+          transition: --notch-x 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* Badan bar: putih, dengan lubang melingkar di atas item aktif */
+        body .bottom-nav::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          z-index: 0;
+          border-radius: 28px;
+          background: #fff;
+          pointer-events: none;
+          -webkit-mask-image: radial-gradient(
+            circle 35px at var(--notch-x) 4px,
+            transparent 34px,
+            #000 35px
+          );
+          mask-image: radial-gradient(
+            circle 35px at var(--notch-x) 4px,
+            transparent 34px,
+            #000 35px
+          );
+        }
+        [data-theme="dark"] body .bottom-nav::before {
+          background: #1e2235;
+        }
+
+        /* Item */
+        body .bottom-nav .bottom-nav-item {
+          position: relative;
+          z-index: 1;
+          flex: 1 1 0 !important;
+          min-width: 0;
+          margin: 0 !important;
+          padding: 0 0 9px !important;
+          display: flex !important;
+          flex-direction: column;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 4px;
+          background: none !important;
+          border: 0 !important;
+          border-radius: 0 !important;
+          box-shadow: none !important;
+          -webkit-tap-highlight-color: transparent;
+        }
+        body .bottom-nav .bottom-nav-item i {
+          font-size: 20px;
+          transition:
+            transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1),
+            color 0.3s ease;
+        }
+        body .bottom-nav .bottom-nav-item span {
+          max-width: 100%;
+          font-size: 11px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        /* Aktif: ikon naik ke dalam bulan, label menyala */
+        body .bottom-nav .bottom-nav-item.active i {
+          transform: translateY(-29px) scale(1.05);
+          color: #fff !important;
+          animation: navIconPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        body .bottom-nav .bottom-nav-item.active span {
+          font-weight: 700;
+          animation: navLabelIn 0.4s ease both;
+        }
+
+        /* Bulan (lingkaran) yang bergeser mengikuti item aktif */
+        .bottom-nav-bubble {
+          display: block;
+          position: absolute;
+          top: -23px;
+          left: 0;
+          z-index: 0;
+          width: 54px;
+          height: 54px;
+          border-radius: 50%;
+          background: var(--bubble-color, #3b82f6);
+          box-shadow: 0 6px 14px rgba(0, 0, 0, 0.18);
+          opacity: 0;
+          transform: translateX(-100px);
+          pointer-events: none;
+        }
+        body .bottom-nav.nav-ready .bottom-nav-bubble {
+          transition:
+            transform 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+            background-color 0.3s ease,
+            opacity 0.2s ease;
+        }
+      }
+
+      @keyframes navIconPop {
+        0% {
+          transform: translateY(0) scale(0.6);
+        }
+        60% {
+          transform: translateY(-34px) scale(1.2);
+        }
+        100% {
+          transform: translateY(-29px) scale(1.05);
+        }
+      }
+      @keyframes navLabelIn {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        body .bottom-nav,
+        body .bottom-nav .bottom-nav-item i,
+        .bottom-nav-bubble {
+          transition: none !important;
+          animation: none !important;
+        }
+        body .bottom-nav .bottom-nav-item.active i,
+        body .bottom-nav .bottom-nav-item.active span {
+          animation: none !important;
+        }
+      }
+    </style>
+
+    <!-- Tema hijau: sidebar desktop, bottom nav mengambang, drawer "Lainnya".
+         Hanya gaya; id, rute, badge dan perilaku tidak berubah. -->
+    <style id="green-nav-theme">
+      /* Sidebar desktop */
+      body .sidebar {
+        background: var(--bg-secondary);
+        border-right: 1px solid var(--border-color);
+      }
+      body .sidebar .sidebar-header {
+        border-bottom: 1px solid var(--border-color);
+      }
+      body .sidebar .sidebar-header h2 {
+        color: var(--text-primary);
+      }
+      body .sidebar .nav-item {
+        margin: 2px 12px;
+        padding: 12px 14px;
+        border-left: 0;
+        border-radius: 14px;
+        color: var(--text-secondary);
+      }
+      body .sidebar .nav-item span,
+      body .sidebar .nav-item i,
+      [data-theme="vintage"] body .sidebar .nav-item span,
+      [data-theme="nature"] body .sidebar .nav-item span,
+      [data-theme="vintage"] body .sidebar .nav-item i,
+      [data-theme="nature"] body .sidebar .nav-item i {
+        color: var(--text-secondary);
+      }
+      body .sidebar .nav-item:hover {
+        background: rgba(22, 163, 74, 0.08);
+        border-left: 0;
+      }
+      body .sidebar .nav-item.active {
+        background: #e6f6ec;
+        border-left: 0;
+      }
+      body .sidebar .nav-item.active span,
+      body .sidebar .nav-item.active i,
+      [data-theme="vintage"] body .sidebar .nav-item.active span,
+      [data-theme="nature"] body .sidebar .nav-item.active span,
+      [data-theme="vintage"] body .sidebar .nav-item.active i,
+      [data-theme="nature"] body .sidebar .nav-item.active i {
+        color: #16a34a;
+        font-weight: 700;
+      }
+      [data-theme="dark"] body .sidebar .nav-item.active {
+        background: rgba(22, 163, 74, 0.18);
+      }
+
+      @media (max-width: 768px) {
+        /* Pil putih mengambang; tanpa lubang dan tanpa bulan */
+        body .bottom-nav {
+          filter: drop-shadow(0 8px 18px rgba(11, 61, 42, 0.16));
+        }
+        body .bottom-nav::before {
+          -webkit-mask-image: none;
+          mask-image: none;
+          background: var(--bg-secondary);
+          border-radius: 28px;
+        }
+        body .bottom-nav .bottom-nav-bubble {
+          display: none !important;
+        }
+        body .bottom-nav .bottom-nav-item {
+          justify-content: center;
+          padding: 0 !important;
+          color: var(--text-secondary);
+        }
+        body .bottom-nav .bottom-nav-item i,
+        body .bottom-nav .bottom-nav-item span {
+          color: var(--text-secondary);
+        }
+        body .bottom-nav .bottom-nav-item.active i {
+          transform: none;
+          animation: none;
+          color: #16a34a !important;
+        }
+        body .bottom-nav .bottom-nav-item.active span {
+          color: #16a34a;
+          font-weight: 700;
+        }
+
+        /* Drawer "Lainnya" duduk di atas pil navigasi mengambang (tinggi 66px + jarak 12px) */
+        .more-menu-backdrop {
+          bottom: 0;
+        }
+        .more-menu-content {
+          bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+          max-height: calc(100dvh - 120px - env(safe-area-inset-bottom, 0px));
+          overflow-y: auto;
+        }
+      }
+
+      /* Drawer "Lainnya" */
+      .more-menu-content {
+        border-radius: 24px;
+        box-shadow: 0 14px 30px rgba(11, 61, 42, 0.2);
+      }
+      .more-menu-item:hover,
+      .more-menu-item:active {
+        background: #e6f6ec;
+        color: #16a34a;
+      }
+      [data-theme="dark"] .more-menu-item:hover,
+      [data-theme="dark"] .more-menu-item:active {
+        background: rgba(22, 163, 74, 0.18);
+      }
+      .more-menu-item i {
+        color: #16a34a;
+      }
+    </style>
+
+    <!-- Bar navigasi mobile bergaya referensi (lekuk + bulan gradien ungu),
+         warna/radius/bayangan mengikuti finance-stripe-design.md.
+         Hanya gaya; id, rute, badge dan perilaku tidak berubah. -->
+    <style id="stripe-notch-nav">
+      :root {
+        --sn-primary: #533afd;
+        --sn-primary-light: #9b8cff;
+        --sn-foreground: #0a2540;
+        --sn-surface: #f6f9fc;
+        --sn-border: #d8dee8;
+        --sn-font:
+          "sohne-var", "Inter", system-ui, -apple-system, "Segoe UI", Roboto,
+          sans-serif;
+      }
+      [data-theme="dark"] {
+        --sn-foreground: #e6ecf5;
+        --sn-surface: #1e2235;
+        --sn-border: #2f3550;
+      }
+
+      @media (max-width: 768px) {
+        body .bottom-nav {
+          height: 68px !important;
+          border-radius: 12px !important;
+          font-family: var(--sn-font);
+          filter: drop-shadow(0 4px 12px rgba(10, 37, 64, 0.1))
+            drop-shadow(0 0 1px rgba(10, 37, 64, 0.18));
+        }
+
+        /* Badan bar: permukaan terang + lekuk melingkar di atas item aktif */
+        body .bottom-nav::before {
+          border-radius: 12px;
+          background: var(--sn-surface);
+          -webkit-mask-image: radial-gradient(
+            circle 36px at var(--notch-x) 4px,
+            transparent 35px,
+            #000 36px
+          );
+          mask-image: radial-gradient(
+            circle 36px at var(--notch-x) 4px,
+            transparent 35px,
+            #000 36px
+          );
+        }
+
+        /* Item: ikon di atas, label di bawah */
+        body .bottom-nav .bottom-nav-item {
+          justify-content: flex-end;
+          padding: 0 0 10px !important;
+          gap: 5px;
+          color: var(--sn-foreground);
+        }
+        body .bottom-nav .bottom-nav-item i,
+        body .bottom-nav .bottom-nav-item span {
+          color: var(--sn-foreground);
+        }
+        body .bottom-nav .bottom-nav-item i {
+          font-size: 20px;
+        }
+        body .bottom-nav .bottom-nav-item span {
+          font-family: var(--sn-font);
+          font-size: 11px;
+          font-weight: 400;
+          letter-spacing: 0.01em;
+        }
+
+        /* Aktif: ikon naik ke dalam bulan, bergradien ungu */
+        body .bottom-nav .bottom-nav-item.active i {
+          font-size: 22px;
+          transform: translateY(-27px);
+          color: transparent !important;
+          background: linear-gradient(
+            135deg,
+            var(--sn-primary-light) 0%,
+            var(--sn-primary) 100%
+          );
+          -webkit-background-clip: text;
+          background-clip: text;
+          -webkit-text-fill-color: transparent;
+          animation: snIconIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        body .bottom-nav .bottom-nav-item.active span {
+          color: var(--sn-foreground);
+          font-weight: 700;
+        }
+
+        /* Bulan: lingkaran terang yang bergeser mengikuti item aktif */
+        body .bottom-nav .bottom-nav-bubble {
+          display: block !important;
+          top: -25px;
+          width: 56px;
+          height: 56px;
+          background: #fff !important;
+          border: 1px solid var(--sn-border);
+          box-shadow: 0 2px 8px rgba(10, 37, 64, 0.08);
+        }
+        [data-theme="dark"] body .bottom-nav .bottom-nav-bubble {
+          background: #2a2f4a !important;
+        }
+      }
+
+      @keyframes snIconIn {
+        0% {
+          transform: translateY(0) scale(0.6);
+        }
+        60% {
+          transform: translateY(-31px) scale(1.15);
+        }
+        100% {
+          transform: translateY(-27px) scale(1);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        body .bottom-nav .bottom-nav-item.active i {
+          animation: none !important;
+        }
+      }
+    </style>
+
+    <!-- Di dalam <head> setelah CSS -->
+    <script>
+      // Apply theme from localStorage immediately
+      const savedTheme = localStorage.getItem("theme");
+      if (savedTheme === "dark") {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    </script>
+
+    <!-- TODO(SRI): tambahkan integrity + crossorigin="anonymous" untuk 4 resource CDN
+         di bawah (Font Awesome 6.5.1, chart.js 4.4.0, jsPDF 2.5.1, html2canvas 1.4.1)
+         setelah hash dicek lewat srihash.org. Hash belum dihitung/dikarang. -->
+    <!-- Font Awesome Icons (CDN, will work offline after caching) -->
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+    />
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+    <!-- jsPDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <!-- html2canvas (untuk render kartu/desain PDF bergaya modern) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  </head>
+  <body>
+    <div id="app">
+      <div class="app-container">
+        <!-- Sidebar akan diisi JavaScript -->
+        <aside id="sidebar" class="sidebar">
+          <div class="sidebar-header">
+            <img
+              src="images/logo/logo.png"
+              alt="Logo"
+              class="logo"
+              onerror="this.src = 'images/logo/logo.png'"
+            />
+            <h2>Money Manager</h2>
+          </div>
+          <nav class="sidebar-nav">
+            <a href="#" data-page="dashboard" class="nav-item active">
+              <i class="fas fa-tachometer-alt"></i>
+              <span>Dashboard</span>
+            </a>
+            <a href="#" data-page="transactions" class="nav-item">
+              <i class="fas fa-exchange-alt"></i>
+              <span>Transaksi</span>
+            </a>
+            <a href="#" data-page="wallets" class="nav-item">
+              <i class="fas fa-wallet"></i>
+              <span>Dompet</span>
+            </a>
+            <a href="#" data-page="savings" class="nav-item">
+              <i class="fas fa-piggy-bank"></i>
+              <span>Tabungan</span>
+            </a>
+            <a href="#" data-page="debts" class="nav-item">
+              <i class="fas fa-hand-holding-usd"></i>
+              <span>Hutang & Piutang</span>
+            </a>
+            <a href="#" data-page="assets" class="nav-item">
+              <i class="fas fa-chart-pie"></i>
+              <span>Total Aset</span>
+            </a>
+            <a href="#" data-page="health" class="nav-item">
+              <i class="fas fa-heartbeat"></i>
+              <span>Kesehatan Keuangan</span>
+            </a>
+            <a href="#" data-page="simulation" class="nav-item">
+              <i class="fas fa-calculator"></i>
+              <span>Simulasi Alokasi Keuangan</span>
+            </a>
+            <a href="#" data-page="notifications" class="nav-item">
+              <i class="fas fa-bell"></i>
+              <span>Notifikasi</span>
+              <span
+                id="notif-badge"
+                style="
+                  display: none;
+                  background: #ef4444;
+                  color: #fff;
+                  border-radius: 50%;
+                  width: 18px;
+                  height: 18px;
+                  font-size: 0.65rem;
+                  align-items: center;
+                  justify-content: center;
+                  margin-left: auto;
+                "
+                >0</span
+              >
+            </a>
+            <a href="#" data-page="planned" class="nav-item">
+              <i class="fas fa-calendar-check"></i>
+              <span>Rencana Transaksi</span>
+            </a>
+            <a href="#" data-page="templates" class="nav-item">
+              <i class="fas fa-file-invoice"></i>
+              <span>Template Transaksi</span>
+            </a>
+            <a href="#" data-page="reports" class="nav-item">
+              <i class="fas fa-chart-line"></i>
+              <span>Laporan</span>
+            </a>
+            <a href="#" data-page="settings" class="nav-item">
+              <i class="fas fa-cog"></i>
+              <span>Pengaturan</span>
+            </a>
+          </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+          <!-- Bottom Navigation (Mobile) -->
+          <!-- Bottom Navigation (Mobile) -->
+          <div class="bottom-nav">
+            <button data-page="dashboard" class="bottom-nav-item active">
+              <i class="fas fa-tachometer-alt"></i>
+              <span>Beranda</span>
+            </button>
+            <button data-page="transactions" class="bottom-nav-item">
+              <i class="fas fa-exchange-alt"></i>
+              <span>Transaksi</span>
+            </button>
+            <button data-page="wallets" class="bottom-nav-item">
+              <i class="fas fa-wallet"></i>
+              <span>Dompet</span>
+            </button>
+            <button data-page="savings" class="bottom-nav-item">
+              <i class="fas fa-piggy-bank"></i>
+              <span>Tabungan</span>
+            </button>
+            <button id="bottom-nav-more" class="bottom-nav-item">
+              <i class="fas fa-ellipsis-h"></i>
+              <span>Lainnya</span>
+            </button>
+          </div>
+          <!-- Dynamic Content Pages -->
+          <div id="page-content" class="page-content">
+            <!-- Content akan di-load oleh JavaScript -->
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- PIN Lock Screen -->
+    <div id="pin-screen" class="pin-screen hidden">
+      <div class="pin-container">
+        <h3>Masukkan PIN</h3>
+        <div class="pin-display">
+          <input
+            type="password"
+            id="pin-input"
+            maxlength="6"
+            pattern="[0-9]*"
+            inputmode="numeric"
+          />
+        </div>
+        <div class="pin-keypad">
+          <button data-pin="1">1</button>
+          <button data-pin="2">2</button>
+          <button data-pin="3">3</button>
+          <button data-pin="4">4</button>
+          <button data-pin="5">5</button>
+          <button data-pin="6">6</button>
+          <button data-pin="7">7</button>
+          <button data-pin="8">8</button>
+          <button data-pin="9">9</button>
+          <button data-pin="clear">C</button>
+          <button data-pin="0">0</button>
+          <button data-pin="enter">✓</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- More Menu Drawer — harus di luar main agar position:fixed benar -->
+    <div id="more-menu-drawer" class="more-menu-drawer hidden">
+      <div class="more-menu-backdrop"></div>
+      <div class="more-menu-content">
+        <div class="more-menu-handle"></div>
+        <button data-page="notifications" class="more-menu-item">
+          <i class="fas fa-bell"></i>
+          <span>Notifikasi</span>
+        </button>
+        <button data-page="planned" class="more-menu-item">
+          <i class="fas fa-calendar-check"></i>
+          <span>Rencana Transaksi</span>
+        </button>
+        <button data-page="templates" class="more-menu-item">
+          <i class="fas fa-file-invoice"></i>
+          <span>Template Transaksi</span>
+        </button>
+        <button data-page="debts" class="more-menu-item">
+          <i class="fas fa-hand-holding-usd"></i>
+          <span>Hutang & Piutang</span>
+        </button>
+        <button data-page="assets" class="more-menu-item">
+          <i class="fas fa-chart-pie"></i>
+          <span>Total Aset</span>
+        </button>
+        <button data-page="health" class="more-menu-item">
+          <i class="fas fa-heartbeat"></i>
+          <span>Kesehatan Keuangan</span>
+        </button>
+        <button data-page="simulation" class="more-menu-item">
+          <i class="fas fa-calculator"></i>
+          <span>Simulasi Alokasi Keuangan</span>
+        </button>
+        <button data-page="reports" class="more-menu-item">
+          <i class="fas fa-chart-line"></i>
+          <span>Laporan</span>
+        </button>
+        <button data-page="settings" class="more-menu-item">
+          <i class="fas fa-cog"></i>
+          <span>Pengaturan</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- More Menu Drawer — harus di luar main agar position:fixed benar -->
+    <div id="more-menu-drawer" class="more-menu-drawer hidden">
+      <div class="more-menu-backdrop"></div>
+      <div class="more-menu-content">
+        <div class="more-menu-handle"></div>
+        <button data-page="debts" class="more-menu-item">
+          <i class="fas fa-hand-holding-usd"></i>
+          <span>Hutang & Piutang</span>
+        </button>
+        <button data-page="reports" class="more-menu-item">
+          <i class="fas fa-chart-line"></i>
+          <span>Laporan</span>
+        </button>
+        <button data-page="settings" class="more-menu-item">
+          <i class="fas fa-cog"></i>
+          <span>Pengaturan</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Bottom bar mengambang: posisikan "bulan" + lubang di item aktif.
+         Hanya memantau class .active, jadi tidak bergantung pada app.js. -->
+    <script>
+      (function () {
+        const nav = document.querySelector(".bottom-nav");
+        if (!nav) return;
+
+        const SIZE = 56;
+        const bubble = document.createElement("div");
+        bubble.className = "bottom-nav-bubble";
+        bubble.setAttribute("aria-hidden", "true");
+        nav.appendChild(bubble);
+
+        function place() {
+          let active = nav.querySelector(".bottom-nav-item.active");
+          // Halaman dari drawer "Lainnya" tidak punya tombol sendiri di bar:
+          // tandai "Lainnya" sebagai aktif. navigateTo() di app.js otomatis
+          // melepasnya lagi saat user pindah ke halaman utama.
+          if (!active) {
+            const more = document.getElementById("bottom-nav-more");
+            if (more) {
+              more.classList.add("active");
+              active = more;
+            }
+          }
+          if (!active || getComputedStyle(bubble).display === "none") {
+            nav.style.setProperty("--notch-x", "-200px");
+            bubble.style.opacity = "0";
+            return;
+          }
+          const cx = active.offsetLeft + active.offsetWidth / 2;
+          nav.style.setProperty("--notch-x", cx + "px");
+          bubble.style.transform = "translateX(" + (cx - SIZE / 2) + "px)";
+          bubble.style.opacity = "1";
+          // Warna bulan mengikuti warna aktif bawaan (warna label item aktif)
+          const label = active.querySelector("span") || active;
+          bubble.style.setProperty(
+            "--bubble-color",
+            getComputedStyle(label).color,
+          );
+        }
+
+        const observer = new MutationObserver(function () {
+          place();
+          setTimeout(place, 350); // ambil ulang warna setelah transisi warna bawaan selesai
+        });
+        nav.querySelectorAll(".bottom-nav-item").forEach(function (btn) {
+          observer.observe(btn, {
+            attributes: true,
+            attributeFilter: ["class"],
+          });
+        });
+
+        window.addEventListener("resize", place);
+        window.addEventListener("orientationchange", place);
+        window.addEventListener("load", place);
+
+        place();
+        setTimeout(place, 400);
+        // Aktifkan transisi setelah posisi awal terpasang (supaya tidak "meluncur" saat load)
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            nav.classList.add("nav-ready");
+          });
+        });
+      })();
+    </script>
+
+    <!-- JavaScript Modules -->
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
