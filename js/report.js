@@ -3,6 +3,7 @@
 
 import { getAllItems, getTransactionsByDateRange, STORES } from "./db.js";
 import { formatCurrency, formatDate, showToast } from "./utils.js";
+import { savePdf } from "./pdf-save.js";
 
 // State
 let currentReportPeriod = "month";
@@ -14,7 +15,6 @@ let reportData = {
   startDate: "",
   endDate: "",
 };
-let charts = {};
 
 // Nama hari singkat & nama bulan lengkap (untuk label filter tanggal custom)
 const DAY_NAMES_SHORT = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
@@ -141,120 +141,96 @@ export async function renderReportsPage() {
   const container = document.getElementById("page-content");
   if (!container) return;
 
-  // Set default date range
+  // Halaman selalu dibuka pada "Bulan Ini"; samakan state modul dengan tampilan
+  currentReportPeriod = "month";
+  customFilters.day = "all";
+  txVisibleCount = TX_PAGE_SIZE;
+
   const { startDate, endDate } = getDateRange("month");
   reportData.startDate = startDate;
   reportData.endDate = endDate;
 
-  // Load data
   await loadReportData();
 
-  // HTML Template
+  const weekOptions = getCurrentWeekDayOptions()
+    .map((opt) => `<option value="${opt.value}">${opt.label}</option>`)
+    .join("");
+
   container.innerHTML = `
-        <div class="reports-container">
-            <div class="page-header">
-                <h1><i class="fas fa-chart-line"></i> Laporan Keuangan</h1>
-                <button class="btn-primary" id="export-pdf-btn">
-                    <i class="fas fa-file-pdf"></i> Export PDF
-                </button>
-            </div>
-            
-            <div class="filter-period card">
-                <div class="period-buttons">
-                    <button class="period-btn" data-period="week">Minggu Ini</button>
-                    <button class="period-btn active" data-period="month">Bulan Ini</button>
-                    <button class="period-btn" data-period="year">Tahun Ini</button>
-                    <button class="period-btn" data-period="custom">🎯 Pilih Tanggal</button>
-                </div>
-                <div class="custom-date-group" id="report-custom-date-group" style="display: none;">
-                    <select id="filter-report-day" class="filter-select">
-                        <option value="all">Tanggal (Semua di Minggu Ini)</option>
-                        ${getCurrentWeekDayOptions()
-                          .map(
-                            (opt) =>
-                              `<option value="${opt.value}">${opt.label}</option>`,
-                          )
-                          .join("")}
-                    </select>
-                    <select id="filter-report-month" class="filter-select" disabled>
-                        <option value="${new Date().getMonth() + 1}" selected>
-                            ${MONTH_NAMES_FULL[new Date().getMonth()]} (Bulan Ini)
-                        </option>
-                    </select>
-                    <select id="filter-report-year" class="filter-select" disabled>
-                        <option value="${new Date().getFullYear()}" selected>
-                            ${new Date().getFullYear()} (Tahun Ini)
-                        </option>
-                    </select>
-                </div>
-                <small id="report-custom-date-help" style="display: none; margin-top: 8px; font-size: 0.7rem; color: var(--text-secondary);">
-                    Laporan hanya bisa ditampilkan untuk periode berjalan (minggu, bulan, dan tahun ini) — bulan/tahun lain tidak bisa dipilih.
-                </small>
-            </div>
-            
-            <div class="summary-cards">
-                <div class="summary-card income">
-                    <div class="summary-icon"><i class="fas fa-arrow-down"></i></div>
-                    <div class="summary-info">
-                        <span class="summary-label">Total Pemasukan</span>
-                        <span class="summary-value" id="total-income">Rp 0</span>
-                    </div>
-                </div>
-                <div class="summary-card expense">
-                    <div class="summary-icon"><i class="fas fa-arrow-up"></i></div>
-                    <div class="summary-info">
-                        <span class="summary-label">Total Pengeluaran</span>
-                        <span class="summary-value" id="total-expense">Rp 0</span>
-                    </div>
-                </div>
-                <div class="summary-card saving">
-                    <div class="summary-icon"><i class="fas fa-piggy-bank"></i></div>
-                    <div class="summary-info">
-                        <span class="summary-label">Total Ditabung</span>
-                        <span class="summary-value" id="total-saving">Rp 0</span>
-                    </div>
-                </div>
-                <div class="summary-card balance">
-                    <div class="summary-icon"><i class="fas fa-wallet"></i></div>
-                    <div class="summary-info">
-                        <span class="summary-label">Saldo Akhir</span>
-                        <span class="summary-value" id="total-balance">Rp 0</span>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="charts-row">
-                <div class="chart-card card">
-                    <h3><i class="fas fa-chart-pie"></i> Kategori Pengeluaran</h3>
-                    <canvas id="category-chart" style="max-height: 300px;"></canvas>
-                </div>
-                <div class="chart-card card">
-                    <h3><i class="fas fa-chart-line"></i> Tren Bulanan</h3>
-                    <canvas id="trend-chart" style="max-height: 300px;"></canvas>
-                </div>
-            </div>
-            
-            <div class="transaction-details card">
-                <h3><i class="fas fa-list"></i> Detail Transaksi</h3>
-                <div class="table-responsive">
-                    <table class="transaction-table">
-                        <thead>
-                            <tr><th>Tanggal</th><th>Deskripsi</th><th>Kategori</th><th>Nominal</th></tr>
-                        </thead>
-                        <tbody id="transaction-table-body"></tbody>
-                    </table>
-                </div>
-            </div>
+    <div class="reports-container rp">
+      <div class="rp-head">
+        <div class="rp-head-text">
+          <h1>Laporan Keuangan</h1>
+          <p class="rp-range" id="report-range" aria-live="polite"></p>
         </div>
-    `;
+        <button type="button" class="btn-primary rp-export" id="export-pdf-btn">
+          <i class="fas fa-file-pdf" aria-hidden="true"></i> Export PDF
+        </button>
+      </div>
 
-  // Add styles
+      <div class="rp-period" role="group" aria-label="Periode laporan">
+        <button type="button" class="period-btn" data-period="week" aria-pressed="false">Minggu Ini</button>
+        <button type="button" class="period-btn active" data-period="month" aria-pressed="true">Bulan Ini</button>
+        <button type="button" class="period-btn" data-period="year" aria-pressed="false">Tahun Ini</button>
+        <button type="button" class="period-btn" data-period="custom" aria-pressed="false">Pilih Tanggal</button>
+      </div>
+      <div class="rp-custom" id="report-custom-date-group" style="display: none;">
+        <select id="filter-report-day" class="filter-select" aria-label="Tanggal">
+          <option value="all">Semua tanggal minggu ini</option>
+          ${weekOptions}
+        </select>
+        <select id="filter-report-month" class="filter-select" aria-label="Bulan" disabled>
+          <option value="${new Date().getMonth() + 1}" selected>${MONTH_NAMES_FULL[new Date().getMonth()]} (bulan ini)</option>
+        </select>
+        <select id="filter-report-year" class="filter-select" aria-label="Tahun" disabled>
+          <option value="${new Date().getFullYear()}" selected>${new Date().getFullYear()} (tahun ini)</option>
+        </select>
+      </div>
+      <p class="rp-help" id="report-custom-date-help" style="display: none;">
+        Laporan hanya bisa ditampilkan untuk periode berjalan (minggu, bulan, dan tahun ini).
+      </p>
+
+      <section class="rp-panel rp-summary" aria-label="Ringkasan periode">
+        <div class="rp-balance">
+          <span class="rp-label">Saldo Akhir <small>(pemasukan − pengeluaran)</small></span>
+          <span class="rp-balance-value" id="total-balance">Rp 0</span>
+        </div>
+        <dl class="rp-flows">
+          <div>
+            <dt><span class="rp-dot in" aria-hidden="true"></span>Total Pemasukan</dt>
+            <dd id="total-income">Rp 0</dd>
+          </div>
+          <div>
+            <dt><span class="rp-dot out" aria-hidden="true"></span>Total Pengeluaran</dt>
+            <dd id="total-expense">Rp 0</dd>
+          </div>
+          <div>
+            <dt><span class="rp-dot save" aria-hidden="true"></span>Total Ditabung</dt>
+            <dd id="total-saving">Rp 0</dd>
+          </div>
+        </dl>
+      </section>
+
+      <div class="rp-grid">
+        <section class="rp-panel" aria-labelledby="rp-cat-title">
+          <h2 id="rp-cat-title">Kategori Pengeluaran</h2>
+          <div id="rp-categories"></div>
+        </section>
+        <section class="rp-panel" aria-labelledby="rp-trend-title">
+          <h2 id="rp-trend-title">Arus Kas <span id="rp-trend-unit"></span></h2>
+          <div id="rp-trend"></div>
+        </section>
+      </div>
+
+      <section class="rp-panel" aria-labelledby="rp-tx-title">
+        <h2 id="rp-tx-title">Detail Transaksi</h2>
+        <div id="rp-tx"></div>
+      </section>
+    </div>
+  `;
+
   addReportStyles();
-
-  // Setup event listeners
   setupReportEventListeners();
-
-  // Render data
   await renderReportData();
 }
 
@@ -280,11 +256,9 @@ function getMultiItems(t) {
 async function renderReportData() {
   const transactions = reportData.transactions;
 
-  // Calculate stats
   let totalIncome = 0;
   let totalExpense = 0;
   let totalSaving = 0;
-
   transactions.forEach((t) => {
     if (t.type === "income") totalIncome += t.amount;
     else if (t.type === "saving") totalSaving += t.amount;
@@ -292,220 +266,242 @@ async function renderReportData() {
   });
   const balance = totalIncome - totalExpense;
 
-  // Update summary
   document.getElementById("total-income").textContent =
     formatCurrency(totalIncome);
   document.getElementById("total-expense").textContent =
     formatCurrency(totalExpense);
   document.getElementById("total-saving").textContent =
     formatCurrency(totalSaving);
-  document.getElementById("total-balance").textContent =
-    formatCurrency(balance);
+  const balanceEl = document.getElementById("total-balance");
+  balanceEl.textContent = formatCurrency(balance);
+  balanceEl.classList.toggle("neg", balance < 0);
 
-  // Render charts
-  await renderCategoryChart(transactions);
-  await renderTrendChart(transactions);
-
-  // Render table
-  renderTransactionTable(transactions);
-}
-
-// Render category pie chart
-async function renderCategoryChart(transactions) {
-  const canvas = document.getElementById("category-chart");
-  if (!canvas) return;
-
-  const ctx = canvas.getContext("2d");
-  const expenseTransactions = transactions.filter((t) => t.type === "expense");
-
-  const categoryTotals = {};
-  expenseTransactions.forEach((t) => {
-    const multi = getMultiItems(t);
-    if (multi) {
-      // Transaksi banyak: hitung per kategori barang, bukan satu kategori induk
-      multi.forEach((it) => {
-        const category = it.category || "Lainnya";
-        categoryTotals[category] =
-          (categoryTotals[category] || 0) + it.amount * it.quantity;
-      });
-      return;
-    }
-    const category = t.category || "Lainnya";
-    categoryTotals[category] = (categoryTotals[category] || 0) + t.amount;
-  });
-
-  const categories = Object.keys(categoryTotals);
-  const amounts = Object.values(categoryTotals);
-  const colors = [
-    "#ef4444",
-    "#f59e0b",
-    "#10b981",
-    "#3b82f6",
-    "#8b5cf6",
-    "#ec4899",
-    "#06b6d4",
-  ];
-
-  if (charts.category) charts.category.destroy();
-
-  if (categories.length === 0) {
-    ctx.fillStyle = "#ccc";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "#666";
-    ctx.font = "14px Arial";
-    ctx.fillText("Tidak ada data", canvas.width / 2 - 50, canvas.height / 2);
-    return;
+  const rangeEl = document.getElementById("report-range");
+  if (rangeEl) {
+    rangeEl.textContent =
+      reportData.startDate === reportData.endDate
+        ? formatDate(reportData.startDate)
+        : `${formatDate(reportData.startDate)} – ${formatDate(reportData.endDate)}`;
   }
 
-  charts.category = new Chart(ctx, {
-    type: "pie",
-    data: {
-      labels: categories,
-      datasets: [
-        {
-          data: amounts,
-          backgroundColor: colors.slice(0, categories.length),
-          borderWidth: 0,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: {
-        legend: { position: "right", labels: { font: { size: 10 } } },
-        tooltip: {
-          callbacks: {
-            label: function (context) {
-              const total = context.dataset.data.reduce((a, b) => a + b, 0);
-              const percentage =
-                total > 0 ? ((context.raw / total) * 100).toFixed(1) : 0;
-              return `${context.label}: ${formatCurrency(context.raw)} (${percentage}%)`;
-            },
-          },
-        },
-      },
-    },
-  });
+  renderCategoryBreakdown(transactions);
+  renderTrend(transactions);
+  renderTransactionList(transactions);
 }
 
-// Render trend line chart
-async function renderTrendChart(transactions) {
-  const canvas = document.getElementById("trend-chart");
-  if (!canvas) return;
+// Rincian pengeluaran per kategori: batang proporsional (CSS, tanpa library grafik)
+const CATEGORY_LIMIT = 8;
+function renderCategoryBreakdown(transactions) {
+  const el = document.getElementById("rp-categories");
+  if (!el) return;
 
-  const ctx = canvas.getContext("2d");
+  const totals = {};
+  transactions
+    .filter((t) => t.type === "expense")
+    .forEach((t) => {
+      const multi = getMultiItems(t);
+      if (multi) {
+        // Transaksi banyak: hitung per kategori barang, bukan satu kategori induk
+        multi.forEach((it) => {
+          const c = it.category || "Lainnya";
+          totals[c] = (totals[c] || 0) + it.amount * it.quantity;
+        });
+        return;
+      }
+      const c = t.category || "Lainnya";
+      totals[c] = (totals[c] || 0) + t.amount;
+    });
 
-  // Group by month (grafik tren cuma bandingkan income vs expense;
-  // transaksi tipe "saving" sengaja tidak diikutkan di sini)
-  const monthlyData = {};
+  let rows = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  if (rows.length === 0) {
+    el.innerHTML = '<p class="rp-empty">Belum ada pengeluaran pada periode ini.</p>';
+    return;
+  }
+  const grand = rows.reduce((s, r) => s + r[1], 0);
+  if (rows.length > CATEGORY_LIMIT) {
+    const rest = rows.slice(CATEGORY_LIMIT - 1);
+    rows = rows.slice(0, CATEGORY_LIMIT - 1);
+    rows.push([
+      `${rest.length} kategori lainnya`,
+      rest.reduce((s, r) => s + r[1], 0),
+    ]);
+  }
+  const max = rows[0][1] > 0 ? Math.max(...rows.map((r) => r[1])) : 1;
+
+  el.innerHTML = `<ol class="rp-cats">${rows
+    .map(([name, amount]) => {
+      const share = grand > 0 ? (amount / grand) * 100 : 0;
+      const width = max > 0 ? Math.max((amount / max) * 100, 1) : 0;
+      return `
+        <li>
+          <div class="rp-cat-top">
+            <span class="rp-cat-name">${escapeHtml(name)}</span>
+            <span class="rp-cat-val">${formatCurrency(amount)} <small>${share.toFixed(1)}%</small></span>
+          </div>
+          <div class="rp-meter" aria-hidden="true"><span style="width:${width}%"></span></div>
+        </li>`;
+    })
+    .join("")}</ol>`;
+}
+
+// Arus kas per hari (minggu/bulan/hari) atau per bulan (tahun): pasangan batang
+// pemasukan & pengeluaran. Tap/klik batang untuk melihat nominalnya.
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+
+function buildBuckets() {
+  const parse = (s) => {
+    const [y, m, d] = s.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  };
+  const start = parse(reportData.startDate);
+  const end = parse(reportData.endDate);
+  const buckets = [];
+  if (currentReportPeriod === "year") {
+    for (let m = 0; m < 12; m++) {
+      buckets.push({
+        key: `${start.getFullYear()}-${String(m + 1).padStart(2, "0")}`,
+        label: MONTHS_SHORT[m],
+        full: `${MONTH_NAMES_FULL[m]} ${start.getFullYear()}`,
+        income: 0,
+        expense: 0,
+      });
+    }
+    return { buckets, unit: "per bulan", keyLen: 7 };
+  }
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const key = formatDateToYYYYMMDD(d);
+    buckets.push({
+      key,
+      label:
+        end - start <= 6 * 86400000
+          ? `${DAY_NAMES_SHORT[d.getDay()]} ${d.getDate()}`
+          : String(d.getDate()),
+      full: formatDate(key),
+      income: 0,
+      expense: 0,
+    });
+  }
+  return { buckets, unit: "per hari", keyLen: 10 };
+}
+
+function renderTrend(transactions) {
+  const el = document.getElementById("rp-trend");
+  const unitEl = document.getElementById("rp-trend-unit");
+  if (!el) return;
+
+  const { buckets, unit, keyLen } = buildBuckets();
+  if (unitEl) unitEl.textContent = buckets.length > 1 ? `(${unit})` : "";
+
+  const index = new Map(buckets.map((b, i) => [b.key, i]));
   transactions.forEach((t) => {
     if (t.type !== "income" && t.type !== "expense") return;
-    const month = t.date.substring(0, 7);
-    if (!monthlyData[month]) monthlyData[month] = { income: 0, expense: 0 };
-    monthlyData[month][t.type] += t.amount;
+    const i = index.get(String(t.date).substring(0, keyLen));
+    if (i !== undefined) buckets[i][t.type] += t.amount;
   });
 
-  const months = Object.keys(monthlyData).sort();
-  const incomeData = months.map((m) => monthlyData[m].income);
-  const expenseData = months.map((m) => monthlyData[m].expense);
-  const monthLabels = months.map((m) => getMonthNameFromDate(m));
-
-  if (charts.trend) charts.trend.destroy();
-
-  if (months.length === 0) {
-    ctx.fillStyle = "#ccc";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "#666";
-    ctx.font = "14px Arial";
-    ctx.fillText("Tidak ada data", canvas.width / 2 - 50, canvas.height / 2);
+  const max = Math.max(1, ...buckets.map((b) => Math.max(b.income, b.expense)));
+  if (buckets.every((b) => b.income === 0 && b.expense === 0)) {
+    el.innerHTML = '<p class="rp-empty">Belum ada pemasukan atau pengeluaran pada periode ini.</p>';
     return;
   }
 
-  charts.trend = new Chart(ctx, {
-    type: "line",
-    data: {
-      labels: monthLabels,
-      datasets: [
-        {
-          label: "Pemasukan",
-          data: incomeData,
-          borderColor: "#10b981",
-          backgroundColor: "rgba(16, 185, 129, 0.1)",
-          fill: true,
-          tension: 0.4,
-        },
-        {
-          label: "Pengeluaran",
-          data: expenseData,
-          borderColor: "#ef4444",
-          backgroundColor: "rgba(239, 68, 68, 0.1)",
-          fill: true,
-          tension: 0.4,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: {
-        tooltip: {
-          callbacks: {
-            label: function (context) {
-              return `${context.dataset.label}: ${formatCurrency(context.raw)}`;
-            },
-          },
-        },
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          ticks: { callback: (value) => formatCurrency(value) },
-        },
-      },
-    },
-  });
-}
-
-// Render transaction table
-function renderTransactionTable(transactions) {
-  const tbody = document.getElementById("transaction-table-body");
-  if (!tbody) return;
-
-  if (transactions.length === 0) {
-    tbody.innerHTML =
-      '<tr><td colspan="4" class="empty-table">Tidak ada transaksi</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = transactions
-    .slice(0, 50)
-    .map((t) => {
-      const multi = getMultiItems(t);
-      const itemRows = multi
-        ? multi
-            .map(
-              (it) => `
-        <tr class="report-item-row">
-            <td></td>
-            <td style="padding-left:20px;font-size:.85em;opacity:.85;">↳ ${escapeHtml(it.itemName)} <span style="opacity:.7;">(${it.quantity} × ${formatCurrency(it.amount)})</span></td>
-            <td style="font-size:.85em;opacity:.85;">${escapeHtml(it.category || "-")}</td>
-            <td style="font-size:.85em;opacity:.85;">${formatCurrency(it.amount * it.quantity)}</td>
-        </tr>`,
-            )
-            .join("")
-        : "";
+  const n = buckets.length;
+  const tickEvery = n <= 12 ? 1 : 5;
+  const bars = buckets
+    .map((b, i) => {
+      const label = `${b.full}: pemasukan ${formatCurrency(b.income)}, pengeluaran ${formatCurrency(b.expense)}`;
       return `
-        <tr class="${t.type === "income" ? "income-row" : t.type === "saving" ? "saving-row" : "expense-row"}">
-            <td>${formatDate(t.date)}</td>
-            <td>${multi ? "🧺 " : ""}${escapeHtml(t.itemName)}${multi ? ` <span style="opacity:.7;font-size:.85em;">(${multi.length} barang)</span>` : ""}</td>
-            <td>${escapeHtml(multi ? "Beberapa kategori" : t.category || "-")}</td>
-            <td class="${t.type === "income" ? "income-text" : t.type === "saving" ? "saving-text" : "expense-text"}">
-                ${t.type === "income" ? "+" : t.type === "saving" ? "🐷" : "-"} ${formatCurrency(t.amount)}
-            </td>
-        </tr>${itemRows}`;
+        <button type="button" class="rp-bucket" data-i="${i}" aria-pressed="false" aria-label="${escapeHtml(label)}">
+          <span class="rp-bars">
+            <span class="rp-bar in" style="height:${(b.income / max) * 100}%"></span>
+            <span class="rp-bar out" style="height:${(b.expense / max) * 100}%"></span>
+          </span>
+          <span class="rp-tick">${i % tickEvery === 0 || i === n - 1 ? escapeHtml(b.label) : ""}</span>
+        </button>`;
     })
     .join("");
+
+  el.innerHTML = `
+    <div class="rp-legend">
+      <span><span class="rp-dot in" aria-hidden="true"></span>Pemasukan</span>
+      <span><span class="rp-dot out" aria-hidden="true"></span>Pengeluaran</span>
+      <span class="rp-scale">Tertinggi ${formatCurrency(max)}</span>
+    </div>
+    <div class="rp-trend" style="--cols:${n}">${bars}</div>
+    <p class="rp-readout" id="rp-readout" aria-live="polite">${n > 1 ? "Pilih batang untuk melihat nominalnya." : ""}</p>`;
+
+  const readout = el.querySelector("#rp-readout");
+  const select = (i) => {
+    const b = buckets[i];
+    el.querySelectorAll(".rp-bucket").forEach((btn) =>
+      btn.setAttribute("aria-pressed", String(Number(btn.dataset.i) === i)),
+    );
+    readout.textContent = `${b.full} — Pemasukan ${formatCurrency(b.income)} · Pengeluaran ${formatCurrency(b.expense)}`;
+  };
+  el.querySelectorAll(".rp-bucket").forEach((btn) =>
+    btn.addEventListener("click", () => select(Number(btn.dataset.i))),
+  );
+  if (n === 1) select(0);
+}
+
+// Daftar transaksi: baris rata dengan nominal di kanan
+const TX_PAGE_SIZE = 50;
+let txVisibleCount = TX_PAGE_SIZE;
+const TYPE_LABEL = { income: "Pemasukan", saving: "Tabungan", expense: "Pengeluaran" };
+
+function renderTransactionList(transactions) {
+  const el = document.getElementById("rp-tx");
+  if (!el) return;
+
+  if (transactions.length === 0) {
+    el.innerHTML = '<p class="rp-empty">Tidak ada transaksi pada periode ini.</p>';
+    return;
+  }
+
+  const shown = transactions.slice(0, txVisibleCount);
+  const rows = shown
+    .map((t) => {
+      const multi = getMultiItems(t);
+      const type = t.type === "income" || t.type === "saving" ? t.type : "expense";
+      const sign = type === "income" ? "+" : type === "expense" ? "-" : "";
+      const subItems = multi
+        ? `<ul class="rp-sub">${multi
+            .map(
+              (it) => `
+          <li>
+            <span>${escapeHtml(it.itemName)} <small>${it.quantity} × ${formatCurrency(it.amount)} · ${escapeHtml(it.category || "-")}</small></span>
+            <span>${formatCurrency(it.amount * it.quantity)}</span>
+          </li>`,
+            )
+            .join("")}</ul>`
+        : "";
+      return `
+        <li class="rp-tx ${type}">
+          <div class="rp-tx-main">
+            <div class="rp-tx-text">
+              <span class="rp-tx-name">${escapeHtml(t.itemName)}${multi ? ` <small>(${multi.length} barang)</small>` : ""}</span>
+              <span class="rp-tx-meta">${formatDate(t.date)} · ${escapeHtml(multi ? "Beberapa kategori" : t.category || "-")} · ${TYPE_LABEL[type]}</span>
+            </div>
+            <span class="rp-tx-amt">${sign}${formatCurrency(t.amount)}</span>
+          </div>
+          ${subItems}
+        </li>`;
+    })
+    .join("");
+
+  const more =
+    transactions.length > shown.length
+      ? `<div class="rp-more">
+           <span>Menampilkan ${shown.length} dari ${transactions.length} transaksi</span>
+           <button type="button" class="btn-secondary" id="rp-more-btn">Tampilkan lebih banyak</button>
+         </div>`
+      : "";
+
+  el.innerHTML = `<ul class="rp-txlist">${rows}</ul>${more}`;
+  el.querySelector("#rp-more-btn")?.addEventListener("click", () => {
+    txVisibleCount += TX_PAGE_SIZE;
+    renderTransactionList(reportData.transactions);
+  });
 }
 
 // Setup event listeners
@@ -516,10 +512,12 @@ function setupReportEventListeners() {
 
   document.querySelectorAll(".period-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      document
-        .querySelectorAll(".period-btn")
-        .forEach((b) => b.classList.remove("active"));
+      document.querySelectorAll(".period-btn").forEach((b) => {
+        b.classList.remove("active");
+        b.setAttribute("aria-pressed", "false");
+      });
       btn.classList.add("active");
+      btn.setAttribute("aria-pressed", "true");
       currentReportPeriod = btn.dataset.period;
 
       // Tampilkan/sembunyikan panel filter tanggal custom
@@ -532,6 +530,7 @@ function setupReportEventListeners() {
       // Reset pilihan tanggal setiap kali pindah/membuka filter custom
       customFilters.day = "all";
       if (filterReportDay) filterReportDay.value = "all";
+      txVisibleCount = TX_PAGE_SIZE;
 
       const { startDate, endDate } = getDateRange(
         currentReportPeriod,
@@ -542,7 +541,6 @@ function setupReportEventListeners() {
 
       await loadReportData();
       await renderReportData();
-      showToast(`Menampilkan laporan ${btn.textContent}`, "success");
     });
   });
 
@@ -550,6 +548,7 @@ function setupReportEventListeners() {
   if (filterReportDay) {
     filterReportDay.addEventListener("change", async (e) => {
       customFilters.day = e.target.value;
+      txVisibleCount = TX_PAGE_SIZE;
 
       const { startDate, endDate } = getDateRange("custom", customFilters.day);
       reportData.startDate = startDate;
@@ -557,12 +556,6 @@ function setupReportEventListeners() {
 
       await loadReportData();
       await renderReportData();
-
-      const label =
-        customFilters.day === "all"
-          ? "Menampilkan laporan minggu ini"
-          : `Menampilkan laporan tanggal ${formatDate(customFilters.day)}`;
-      showToast(label, "success");
     });
   }
 
@@ -903,11 +896,17 @@ async function exportToPDF() {
       });
     }
 
-    doc.save(`laporan_keuangan_${new Date().toISOString().slice(0, 10)}.pdf`);
-    showToast("PDF berhasil diunduh!", "success");
+    const result = await savePdf(
+      doc,
+      `laporan_keuangan_${new Date().toISOString().slice(0, 10)}.pdf`,
+    );
+    if (result !== "cancelled") showToast("PDF berhasil diunduh!", "success");
   } catch (error) {
     console.error("PDF error:", error);
-    showToast("Gagal membuat PDF. Pastikan koneksi internet aktif.", "error");
+    showToast(
+      "Gagal membuat atau menyimpan PDF. Pastikan koneksi internet aktif.",
+      "error",
+    );
   }
 }
 
@@ -918,44 +917,105 @@ function addReportStyles() {
   const style = document.createElement("style");
   style.id = "report-styles";
   style.textContent = `
-        .reports-container { max-width: 1200px; margin: 0 auto; }
-        .filter-period { margin-bottom: 20px; }
-        .period-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
-        .period-btn { padding: 8px 16px; border: 1px solid var(--border-color); background: var(--bg-primary); border-radius: 8px; cursor: pointer; }
-        .period-btn.active { background: var(--info); color: white; border-color: var(--info); }
-        .summary-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
-        .summary-card { background: var(--bg-secondary); border-radius: 16px; padding: 16px; display: flex; align-items: center; gap: 15px; }
-        .summary-icon { width: 50px; height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; }
-        .summary-card.income .summary-icon { background: rgba(16,185,129,0.1); color: #10b981; }
-        .summary-card.expense .summary-icon { background: rgba(239,68,68,0.1); color: #ef4444; }
-        .summary-card.saving .summary-icon { background: rgba(139,92,246,0.1); color: #8b5cf6; }
-        .summary-card.balance .summary-icon { background: rgba(59,130,246,0.1); color: #3b82f6; }
-        .summary-info { flex: 1; }
-        .summary-label { display: block; font-size: 0.75rem; color: var(--text-secondary); }
-        .summary-value { font-size: 1.2rem; font-weight: 700; }
-        .charts-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 20px; }
-        .chart-card { padding: 20px; }
-        .chart-card h3 { font-size: 1rem; margin-bottom: 16px; }
-        .transaction-details { padding: 20px; }
-        .transaction-details h3 { font-size: 1rem; margin-bottom: 16px; }
-        .table-responsive { overflow-x: auto; }
-        .transaction-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-        .transaction-table th, .transaction-table td { padding: 10px 8px; text-align: left; border-bottom: 1px solid var(--border-color); }
-        .income-row { background: rgba(16,185,129,0.02); }
-        .expense-row { background: rgba(239,68,68,0.02); }
-        .saving-row { background: rgba(139,92,246,0.02); }
-        .income-text { color: #10b981; font-weight: 600; }
-        .expense-text { color: #ef4444; font-weight: 600; }
-        .saving-text { color: #8b5cf6; font-weight: 600; }
-        .empty-table { text-align: center; padding: 40px; color: var(--text-secondary); }
-        @media (max-width: 1024px) {
-            .summary-cards { grid-template-columns: repeat(2, 1fr); }
-        }
-        @media (max-width: 768px) {
-            .summary-cards { grid-template-columns: 1fr; }
-            .charts-row { grid-template-columns: 1fr; }
-        }
-    `;
+    .rp { max-width: 1100px; margin: 0 auto; padding-bottom: 24px; font-variant-numeric: tabular-nums; }
+    .rp-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+    .rp-head h1 { font-size: 1.4rem; font-weight: 700; line-height: 1.2; }
+    .rp-range { margin-top: 4px; font-size: .85rem; color: var(--text-secondary); }
+    .rp-export { display: inline-flex; align-items: center; gap: 8px; }
+
+    /* Pilihan periode: satu kontrol bersegmen */
+    .rp-period { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; background: var(--bg-secondary); margin-bottom: 12px; }
+    .rp-period .period-btn { padding: 11px 6px; border: 0; border-left: 1px solid var(--border-color); background: transparent; color: var(--text-primary); font-size: .85rem; cursor: pointer; min-height: 44px; }
+    .rp-period .period-btn:first-child { border-left: 0; }
+    .rp-period .period-btn.active { background: var(--info); color: #fff; font-weight: 600; }
+    .rp-custom { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+    .rp-custom .filter-select { width: 100%; }
+    .rp-help { font-size: .75rem; color: var(--text-secondary); margin-bottom: 12px; }
+
+    .rp-panel { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    .rp-panel h2 { font-size: .95rem; font-weight: 600; margin-bottom: 12px; }
+    .rp-panel h2 span { font-weight: 400; color: var(--text-secondary); font-size: .8rem; }
+    .rp-empty { color: var(--text-secondary); font-size: .85rem; padding: 12px 0; }
+
+    /* Ringkasan: saldo sebagai angka utama, tiga arus di bawahnya */
+    .rp-summary { padding: 0; }
+    .rp-balance { padding: 16px; border-bottom: 1px solid var(--border-color); }
+    .rp-label { display: block; font-size: .8rem; color: var(--text-secondary); }
+    .rp-label small { font-size: .72rem; }
+    .rp-balance-value { display: block; margin-top: 4px; font-size: 1.9rem; font-weight: 700; line-height: 1.15; overflow-wrap: anywhere; }
+    .rp-balance-value.neg { color: var(--danger); }
+    .rp-flows { display: grid; grid-template-columns: repeat(3, 1fr); }
+    .rp-flows > div { padding: 12px 16px; border-left: 1px solid var(--border-color); min-width: 0; }
+    .rp-flows > div:first-child { border-left: 0; }
+    .rp-flows dt { font-size: .75rem; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
+    .rp-flows dd { margin: 4px 0 0; font-size: 1.02rem; font-weight: 600; overflow-wrap: anywhere; }
+    .rp-dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; flex: none; margin-right: 6px; }
+    .rp-flows .rp-dot { margin-right: 0; }
+    .rp-dot.in { background: var(--success); }
+    .rp-dot.out { background: var(--danger); }
+    .rp-dot.save { background: var(--purple); }
+
+    .rp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+    .rp-grid .rp-panel { margin-bottom: 16px; min-width: 0; }
+
+    /* Kategori */
+    .rp-cats { list-style: none; display: flex; flex-direction: column; gap: 12px; }
+    .rp-cat-top { display: flex; justify-content: space-between; gap: 12px; font-size: .85rem; margin-bottom: 4px; }
+    .rp-cat-name { min-width: 0; overflow-wrap: anywhere; }
+    .rp-cat-val { font-weight: 600; white-space: nowrap; }
+    .rp-cat-val small { font-weight: 400; color: var(--text-secondary); margin-left: 4px; }
+    .rp-meter { height: 6px; background: var(--bg-primary); border-radius: 3px; overflow: hidden; }
+    .rp-meter span { display: block; height: 100%; background: var(--danger); border-radius: 3px; }
+
+    /* Arus kas */
+    .rp-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .75rem; color: var(--text-secondary); margin-bottom: 8px; }
+    .rp-legend .rp-scale { margin-left: auto; }
+    .rp-trend { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 3px; }
+    .rp-bucket { display: flex; flex-direction: column; align-items: stretch; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; border-radius: 4px; min-width: 0; }
+    .rp-bars { display: flex; align-items: flex-end; justify-content: center; gap: 1px; height: 140px; border-bottom: 1px solid var(--border-color); padding: 0 1px; }
+    .rp-bar { flex: 1; max-width: 14px; min-height: 0; border-radius: 2px 2px 0 0; }
+    .rp-bar.in { background: var(--success); }
+    .rp-bar.out { background: var(--danger); }
+    .rp-tick { height: 16px; margin-top: 4px; font-size: .62rem; color: var(--text-secondary); text-align: center; white-space: nowrap; overflow: visible; }
+    .rp-bucket[aria-pressed="true"] .rp-bars { background: var(--bg-primary); }
+    .rp-bucket[aria-pressed="true"] .rp-tick { color: var(--text-primary); font-weight: 700; }
+    .rp-readout { margin-top: 10px; min-height: 1.3em; font-size: .8rem; color: var(--text-secondary); overflow-wrap: anywhere; }
+
+    /* Daftar transaksi */
+    .rp-txlist { list-style: none; }
+    .rp-tx { padding: 10px 0; border-top: 1px solid var(--border-color); }
+    .rp-tx:first-child { border-top: 0; padding-top: 0; }
+    .rp-tx-main { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .rp-tx-text { min-width: 0; }
+    .rp-tx-name { display: block; font-size: .9rem; overflow-wrap: anywhere; }
+    .rp-tx-name small { color: var(--text-secondary); font-size: .75rem; }
+    .rp-tx-meta { display: block; margin-top: 2px; font-size: .75rem; color: var(--text-secondary); }
+    .rp-tx-amt { font-weight: 600; font-size: .9rem; white-space: nowrap; }
+    .rp-tx.income .rp-tx-amt { color: var(--success); }
+    .rp-tx.expense .rp-tx-amt { color: var(--danger); }
+    .rp-tx.saving .rp-tx-amt { color: var(--purple); }
+    .rp-sub { list-style: none; margin: 6px 0 0 12px; padding-left: 10px; border-left: 2px solid var(--border-color); }
+    .rp-sub li { display: flex; justify-content: space-between; gap: 12px; font-size: .78rem; padding: 2px 0; }
+    .rp-sub small { display: block; color: var(--text-secondary); font-size: .7rem; }
+    .rp-more { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color); font-size: .8rem; color: var(--text-secondary); }
+    .rp-more .btn-secondary { padding: 8px 14px; border-radius: 8px; cursor: pointer; border: 0; min-height: 40px; }
+
+    .rp .period-btn:focus-visible, .rp-bucket:focus-visible, .rp-export:focus-visible, .rp-more .btn-secondary:focus-visible, .rp-custom .filter-select:focus-visible {
+      outline: 2px solid var(--info); outline-offset: 2px;
+    }
+
+    @media (max-width: 768px) {
+      .rp-grid { grid-template-columns: 1fr; gap: 0; }
+      .rp-balance-value { font-size: 1.6rem; }
+      .rp-flows { grid-template-columns: 1fr; }
+      .rp-flows > div { border-left: 0; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+      .rp-flows > div:first-child { border-top: 0; }
+      .rp-flows dd { margin: 0; text-align: right; }
+      .rp-custom { grid-template-columns: 1fr; }
+      .rp-export { width: 100%; justify-content: center; }
+      .rp-bars { height: 110px; }
+    }
+  `;
   document.head.appendChild(style);
 }
 

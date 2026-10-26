@@ -3,6 +3,7 @@
 
 import { getAllItems, STORES } from "./db.js";
 import { formatCurrency, formatDate, showToast } from "./utils.js";
+import { saveImage } from "./pdf-save.js";
 
 export async function renderAssetsPage() {
   const container = document.getElementById("page-content");
@@ -618,18 +619,16 @@ async function exportAssetsToImage(data) {
     // argumen kualitas kedua, mis. canvas.toDataURL("image/jpeg", 0.92)
     const dataUrl = canvas.toDataURL("image/png");
 
-    const link = document.createElement("a");
-    link.href = dataUrl;
-    link.download = `total_aset_${new Date().toISOString().slice(0, 10)}.png`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    const result = await saveImage(
+      dataUrl,
+      `total_aset_${new Date().toISOString().slice(0, 10)}.png`,
+    );
 
-    showToast("Gambar berhasil diunduh!", "success");
+    if (result !== "cancelled") showToast("Gambar berhasil diunduh!", "success");
   } catch (error) {
     console.error("Export gambar error:", error);
     showToast(
-      "Gagal membuat gambar. Pastikan koneksi internet aktif.",
+      "Gagal membuat atau menyimpan gambar. Pastikan koneksi internet aktif.",
       "error",
     );
   } finally {

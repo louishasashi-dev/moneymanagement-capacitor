@@ -3,6 +3,7 @@
 // State hanya di memori dan hilang saat halaman ditutup.
 
 import { formatCurrency, formatMoneyInput, parseMoney } from "./utils.js";
+import { savePdf } from "./pdf-save.js";
 
 const CATEGORIES = [
   { key: "investasi", name: "Investasi", hint: { min: "20", max: "30" } },
@@ -791,14 +792,16 @@ async function exportPdf(btn) {
       buildReport(state.calc, budgets, now),
     );
     const pad = (n) => String(n).padStart(2, "0");
-    doc.save(
+    const result = await savePdf(
+      doc,
       `simulasi-alokasi-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.pdf`,
     );
-    status.textContent = "PDF berhasil dibuat.";
+    status.textContent =
+      result === "cancelled" ? "Penyimpanan PDF dibatalkan." : "PDF berhasil dibuat.";
   } catch (err) {
     console.error(err);
     status.textContent =
-      "Gagal membuat PDF. Periksa koneksi internet lalu coba lagi.";
+      "Gagal membuat atau menyimpan PDF. Periksa koneksi internet lalu coba lagi.";
   } finally {
     btn.disabled = false;
   }

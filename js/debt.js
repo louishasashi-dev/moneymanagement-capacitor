@@ -19,6 +19,7 @@ import {
   formatMoneyInput,
   parseMoney,
 } from "./utils.js";
+import { savePdf } from "./pdf-save.js";
 
 // State
 let allDebts = [];
@@ -2563,10 +2564,11 @@ async function printDebtReport(debtId) {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "_")
       .replace(/^_+|_+$/g, "");
-    doc.save(
+    const result = await savePdf(
+      doc,
       `laporan_${kind.toLowerCase()}_${slug || "data"}_${getCurrentDateTime().date}.pdf`,
     );
-    showToast("Laporan berhasil dibuat!", "success");
+    if (result !== "cancelled") showToast("Laporan berhasil dibuat!", "success");
   } catch (error) {
     console.error("Debt report error:", error);
     showToast("Gagal membuat laporan PDF", "error");
