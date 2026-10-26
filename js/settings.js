@@ -20,6 +20,7 @@ import {
   escapeAttr,
   safeImageSrc,
 } from "./utils.js";
+import { isNativeAndroid, saveTextFile } from "./pdf-save.js";
 
 // State
 let currentSettings = {};
@@ -217,7 +218,7 @@ export async function renderSettingsPage() {
             </div>
 
             <!-- Input file untuk restore (hidden) -->
-            <input type="file" id="restore-file-input" accept=".json" style="display: none;">
+            <input type="file" id="restore-file-input" accept=".json,application/json" style="display: none;">
         </div>
     `;
 
@@ -350,6 +351,7 @@ function setupSettingsEventListeners() {
       if (e.target.files.length > 0) {
         restoreData(e.target.files[0]);
       }
+      e.target.value = "";
     });
   }
 }
@@ -729,6 +731,17 @@ async function backupData() {
     const filename = getBackupFilename();
     const folderName = getBackupFolderName();
 
+    // APK Android: WebView tidak menangani unduhan Blob, simpan lewat lembar Bagikan
+    if (isNativeAndroid()) {
+      const result = await saveTextFile(
+        jsonStr,
+        filename,
+        "Simpan file backup (Drive, File, dll)",
+      );
+      if (result !== "cancelled") showToast("Backup siap disimpan!", "success");
+      return;
+    }
+
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
     if (isMobile) {
@@ -927,12 +940,25 @@ async function exportToCSV() {
       )
       .join("\n");
 
+    const date = new Date();
+    const filename = `money_manager_transactions_${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}.csv`;
+
+    // APK Android: WebView tidak menangani unduhan Blob, simpan lewat lembar Bagikan
+    if (isNativeAndroid()) {
+      const result = await saveTextFile(
+        "\uFEFF" + csvContent,
+        filename,
+        "Simpan file CSV",
+      );
+      if (result !== "cancelled")
+        showToast(`Export ${transactions.length} transaksi berhasil!`, "success");
+      return;
+    }
+
     const blob = new Blob(["\uFEFF" + csvContent], {
       type: "text/csv;charset=utf-8;",
     });
     const url = URL.createObjectURL(blob);
-    const date = new Date();
-    const filename = `money_manager_transactions_${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}.csv`;
 
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 

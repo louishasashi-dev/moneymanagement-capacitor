@@ -9,7 +9,7 @@
 // paket itu dan seluruh aplikasi gagal dimuat. Plugin hanya di-import dinamis di APK
 // (Vite membundelnya saat build).
 
-function isNativeAndroid() {
+export function isNativeAndroid() {
   const cap = window.Capacitor;
   return Boolean(
     cap &&
@@ -103,6 +103,28 @@ export async function saveImage(dataUrl, filename) {
       dialogTitle: "Simpan atau bagikan gambar",
       files: [written.uri],
     });
+    return "shared";
+  } catch (error) {
+    if (/cancel/i.test(String(error?.message || error))) return "cancelled";
+    throw error;
+  }
+}
+
+// Simpan file teks (backup JSON, CSV). Hanya dipakai di APK Android: tulis ke cache
+// lalu buka lembar Bagikan. Di browser pemanggil tetap memakai unduhan lama.
+// Mengembalikan "shared" | "cancelled"; melempar Error jika gagal.
+export async function saveTextFile(text, filename, title = "Simpan atau bagikan file") {
+  if (!text) throw new Error("File kosong");
+  const { Filesystem, Directory, Share } = await loadNativePlugins();
+  const { Encoding } = await import("@capacitor/filesystem");
+  const written = await Filesystem.writeFile({
+    path: filename,
+    data: text,
+    directory: Directory.Cache,
+    encoding: Encoding.UTF8,
+  });
+  try {
+    await Share.share({ title: filename, dialogTitle: title, files: [written.uri] });
     return "shared";
   } catch (error) {
     if (/cancel/i.test(String(error?.message || error))) return "cancelled";
