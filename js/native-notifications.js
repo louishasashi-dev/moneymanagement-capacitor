@@ -389,3 +389,25 @@ export async function sendTestNotification(delaySeconds = 5) {
   });
   return true;
 }
+
+// ── Notifikasi aktivitas (langsung tampil di bilah notifikasi HP) ────────────
+// Dipanggil dari addAppNotification() saat bayar/tambah utang atau tabungan.
+// ID 910000..919999 di luar rentang yang dibersihkan syncNativeNotifications().
+let activitySeq = 0;
+export async function showActivityNotification(title, body) {
+  if (!isNativeAndroid()) return false;
+  if (!(await ensurePermission())) return false;
+  activitySeq = (activitySeq + 1) % 10000;
+  const id = 910000 + ((Date.now() + activitySeq) % 10000);
+  await LocalNotifications.schedule({
+    notifications: [
+      {
+        id,
+        title: String(title || "Hylim"),
+        body: String(body || ""),
+        schedule: { at: new Date(Date.now() + 1000), allowWhileIdle: true },
+      },
+    ],
+  });
+  return true;
+}

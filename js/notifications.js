@@ -51,6 +51,20 @@ async function createNotifIfNotExists(refKey, title, message, type, page) {
   });
 }
 
+// Di APK Android: tampilkan juga di bilah notifikasi HP. Di browser tidak melakukan apa pun.
+// Dimuat dinamis supaya versi web (Live Server) tidak mengimpor @capacitor/*.
+function pushNativeNotification(title, body) {
+  try {
+    const cap = typeof window !== "undefined" ? window.Capacitor : null;
+    if (!cap?.isNativePlatform?.() || cap.getPlatform?.() !== "android") return;
+    import("./native-notifications.js")
+      .then((m) => m.showActivityNotification(title, body))
+      .catch((e) => console.error("Notifikasi Android gagal:", e));
+  } catch (e) {
+    console.error("Notifikasi Android gagal:", e);
+  }
+}
+
 // Tambah satu notifikasi dalam aplikasi (daftar Notifikasi + badge).
 // Dipanggil SETELAH operasi data berhasil disimpan. Tidak pernah melempar error:
 // gagal menampilkan notifikasi tidak boleh membatalkan/mengulang operasi keuangan.
@@ -82,6 +96,7 @@ export async function addAppNotification({
     if (typeof window !== "undefined" && window.updateNotificationBadge) {
       window.updateNotificationBadge();
     }
+    pushNativeNotification(title, message);
     return true;
   } catch (error) {
     console.error("Gagal membuat notifikasi:", error);
