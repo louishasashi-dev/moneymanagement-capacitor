@@ -7,6 +7,7 @@ import {
   deleteItem,
   getAllItems,
   getItem,
+  initDB,
   STORES,
 } from "./db.js";
 import {
@@ -18,7 +19,9 @@ import {
   formatMoneyInput,
   parseMoney,
   safeImageSrc,
+  escapeAttr,
 } from "./utils.js";
+import { addAppNotification } from "./notifications.js";
 import { ensureTxSheetStyles } from "./modal-sheet.js";
 import {
   ensureTypeIconStyles,
@@ -720,6 +723,154 @@ async function showSavingModal(savingId = null) {
 }
 
 // Show modal untuk tambah uang ke tabungan
+// ==================== SINKRONISASI TABUNGAN <-> TRANSAKSI <-> DOMPET ====================
+// Tambah / ambil tabungan dari halaman ini dicatat sebagai transaksi dan mengubah
+// saldo dompet, semuanya dalam SATU transaksi IndexedDB (gagal = semua dibatalkan,
+// tidak ada saldo atau transaksi setengah tersimpan). Pola sama dengan debt.js.
+//   deposit  : dompet -> tabungan, transaksi PENGELUARAN "Penambahan Tabungan ke [nama]"
+//   withdraw : tabungan -> dompet, transaksi PEMASUKAN "Pengambilan tabungan dari [nama]"
+// Alur penambahan tabungan lewat halaman Transaksi (type "saving") TIDAK disentuh.
+
+function idbRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function walletSelectGroupHtml(id, label, wallets) {
+  return `
+            <div class="form-group">
+                <label>${label} <span class="required">*</span></label>
+                <select id="${id}" class="form-input" required>
+                    <option value="">Pilih dompet</option>
+                    ${wallets
+                      .map(
+                        (w) =>
+                          `<option value="${escapeAttr(w.id)}">${escapeHtml(w.name)} - ${formatCurrency(w.balance || 0)}</option>`,
+                      )
+                      .join("")}
+                </select>
+            </div>`;
+}
+
+function savingMovementErrorMessage(result) {
+  switch (result.error) {
+    case "saving-missing":
+      return "Target tabungan tidak ditemukan";
+    case "wallet-missing":
+      return "Dompet tidak ditemukan";
+    case "insufficient":
+      return `Saldo ${result.wallet.name} tidak mencukupi! (Saldo: ${formatCurrency(result.wallet.balance || 0)})`;
+    case "saving-insufficient":
+      return `Jumlah melebihi saldo tabungan (${formatCurrency(result.saving.currentAmount || 0)})`;
+    case "over-target":
+      return `Jumlah melebihi sisa target (${formatCurrency(result.remaining)})`;
+    default:
+      return "Gagal menyimpan. Tidak ada data yang diubah.";
+  }
+}
+
+function saveSavingMovement({ savingId, walletId, amount, direction, note }) {
+  const isDeposit = direction === "deposit";
+  return initDB().then(
+    (db) =>
+      new Promise((resolve) => {
+        const tx = db.transaction(
+          [STORES.SAVINGS, STORES.WALLETS, STORES.TRANSACTIONS],
+          "readwrite",
+        );
+        const savingStore = tx.objectStore(STORES.SAVINGS);
+        const walletStore = tx.objectStore(STORES.WALLETS);
+        const txStore = tx.objectStore(STORES.TRANSACTIONS);
+        let outcome = { ok: false, error: "aborted" };
+        const fail = (o) => {
+          outcome = o;
+          tx.abort();
+        };
+        let savedName = "";
+
+        tx.oncomplete = () => resolve({ ok: true, savingName: savedName });
+        tx.onabort = () => resolve(outcome);
+
+        (async () => {
+          try {
+            // Baca ulang dari DB & validasi SEBELUM menulis apa pun
+            const saving = await idbRequest(savingStore.get(savingId));
+            if (!saving) return fail({ ok: false, error: "saving-missing" });
+            const wallet = await idbRequest(walletStore.get(walletId));
+            if (!wallet) return fail({ ok: false, error: "wallet-missing" });
+
+            const current = saving.currentAmount || 0;
+            if (isDeposit) {
+              const remaining = (saving.targetAmount || 0) - current;
+              if (amount > remaining)
+                return fail({ ok: false, error: "over-target", remaining });
+              if ((wallet.balance || 0) < amount)
+                return fail({ ok: false, error: "insufficient", wallet });
+            } else if (amount > current) {
+              return fail({ ok: false, error: "saving-insufficient", saving });
+            }
+
+            const now = getCurrentDateTime();
+            const balanceBefore = wallet.balance || 0;
+            const txRecord = {
+              itemName: isDeposit
+                ? `Penambahan Tabungan ke ${saving.name}`
+                : `Pengambilan tabungan dari ${saving.name}`,
+              amount,
+              quantity: 1,
+              type: isDeposit ? "expense" : "income",
+              category: isDeposit ? "Tabungan" : "Pengambilan Tabungan",
+              walletId,
+              note: note || "",
+              location: "",
+              date: now.date,
+              time: now.time,
+              savingId: null, // bukan transaksi bertipe "saving" milik halaman Transaksi
+              relatedSavingId: savingId,
+              source: isDeposit ? "savings-deposit" : "savings-withdraw",
+              balanceBefore, // pembanding persentase di halaman transaksi
+              createdAt: now.timestamp,
+            };
+            const txId = await idbRequest(txStore.add(txRecord));
+
+            wallet.balance = balanceBefore + (isDeposit ? -amount : amount);
+            walletStore.put(wallet);
+
+            const newAmount = isDeposit ? current + amount : current - amount;
+            saving.currentAmount = newAmount;
+            saving.status =
+              newAmount >= (saving.targetAmount || 0) ? "completed" : "active";
+            saving.updatedAt = now.datetime;
+            if (!Array.isArray(saving.history)) saving.history = [];
+            saving.history.push({
+              type: isDeposit ? "deposit" : "withdraw",
+              amount,
+              note: note || "",
+              date: new Date().toISOString(),
+              previousAmount: current,
+              newAmount,
+              source: "savings",
+              transactionId: txId,
+              walletId,
+            });
+            savingStore.put(saving);
+            savedName = saving.name;
+          } catch (err) {
+            console.error("Gagal menyimpan perubahan tabungan:", err);
+            outcome = { ok: false, error: "exception" };
+            try {
+              tx.abort();
+            } catch (_) {
+              /* transaksi sudah selesai/abort */
+            }
+          }
+        })();
+      }),
+  );
+}
+
 async function showAddMoneyModal(savingId) {
   ensureTxSheetStyles();
   const saving = await getItem(STORES.SAVINGS, savingId);
@@ -731,6 +882,12 @@ async function showAddMoneyModal(savingId) {
   const remaining = saving.targetAmount - saving.currentAmount;
   if (remaining <= 0) {
     showToast("Target sudah tercapai", "info");
+    return;
+  }
+
+  const wallets = await getAllItems(STORES.WALLETS);
+  if (wallets.length === 0) {
+    showToast("Belum ada dompet. Buat dompet terlebih dahulu.", "error");
     return;
   }
 
@@ -752,6 +909,8 @@ async function showAddMoneyModal(savingId) {
                        placeholder="0" min="1" max="${remaining}" required>
                 <small class="form-help">Maksimal: ${formatCurrency(remaining)}</small>
             </div>
+
+            ${walletSelectGroupHtml("add-wallet", "Ambil uang dari dompet", wallets)}
 
             <div class="form-group">
                 <label>Catatan (Opsional)</label>
@@ -784,11 +943,14 @@ async function showAddMoneyModal(savingId) {
   document.body.appendChild(modal);
 
   const form = modal.querySelector("#add-money-form");
+  let busy = false;
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (busy) return;
 
     const amount = parseMoney(modal.querySelector("#add-amount").value);
     const note = modal.querySelector("#add-note").value;
+    const walletId = modal.querySelector("#add-wallet").value;
 
     if (!amount || amount <= 0) {
       showToast("Jumlah harus lebih dari 0", "error");
@@ -803,27 +965,43 @@ async function showAddMoneyModal(savingId) {
       return;
     }
 
-    // Update saving
-    saving.currentAmount += amount;
-    saving.status =
-      saving.currentAmount >= saving.targetAmount ? "completed" : "active";
-    saving.updatedAt = getCurrentDateTime().datetime;
+    if (!walletId || !wallets.some((w) => String(w.id) === String(walletId))) {
+      showToast("Pilih dompet sumber dulu", "error");
+      return;
+    }
 
-    // Record transaction history (optional, store in savings_history)
-    if (!saving.history) saving.history = [];
-    saving.history.push({
-      type: "deposit",
-      amount: amount,
-      note: note,
-      date: new Date().toISOString(),
-      previousAmount: saving.currentAmount - amount,
-      newAmount: saving.currentAmount,
+    busy = true;
+    let result;
+    try {
+      result = await saveSavingMovement({
+        savingId,
+        walletId: wallets.find((w) => String(w.id) === String(walletId)).id,
+        amount,
+        direction: "deposit",
+        note,
+      });
+    } catch (err) {
+      console.error("Gagal menambah tabungan:", err);
+      result = { ok: false, error: "exception" };
+    } finally {
+      busy = false;
+    }
+    if (!result.ok) {
+      showToast(savingMovementErrorMessage(result), "error");
+      return;
+    }
+
+    addAppNotification({
+      refKey: `saving_deposit_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      title: "Tabungan ditambah",
+      message: `Pengeluaran sebesar ${formatCurrency(amount)} telah ditambahkan ke tabungan ${result.savingName}.`,
+      type: "success",
+      page: "savings",
     });
-
-    await updateItem(STORES.SAVINGS, saving);
+    window.dispatchEvent(new Event("money-manager-data-changed"));
 
     showToast(
-      `Berhasil menambahkan ${formatCurrency(amount)} ke tabungan`,
+      `Berhasil menambahkan ${formatCurrency(amount)} ke tabungan dan mencatat pengeluaran`,
       "success",
     );
     modal.remove();
@@ -852,6 +1030,12 @@ async function showWithdrawModal(savingId) {
     return;
   }
 
+  const wallets = await getAllItems(STORES.WALLETS);
+  if (wallets.length === 0) {
+    showToast("Belum ada dompet. Buat dompet terlebih dahulu.", "error");
+    return;
+  }
+
   const modalContent = `
         <form id="withdraw-form">
             <div class="tx-sheet-scroll">
@@ -869,6 +1053,8 @@ async function showWithdrawModal(savingId) {
                        placeholder="0" min="1" max="${saving.currentAmount}" required>
                 <small class="form-help">Maksimal: ${formatCurrency(saving.currentAmount)}</small>
             </div>
+
+            ${walletSelectGroupHtml("withdraw-wallet", "Simpan uang ke dompet", wallets)}
 
             <div class="form-group">
                 <label>Catatan (Opsional)</label>
@@ -901,11 +1087,14 @@ async function showWithdrawModal(savingId) {
   document.body.appendChild(modal);
 
   const form = modal.querySelector("#withdraw-form");
+  let busy = false;
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (busy) return;
 
     const amount = parseMoney(modal.querySelector("#withdraw-amount").value);
     const note = modal.querySelector("#withdraw-note").value;
+    const walletId = modal.querySelector("#withdraw-wallet").value;
 
     if (!amount || amount <= 0) {
       showToast("Jumlah harus lebih dari 0", "error");
@@ -920,27 +1109,43 @@ async function showWithdrawModal(savingId) {
       return;
     }
 
-    // Update saving
-    saving.currentAmount -= amount;
-    saving.status =
-      saving.currentAmount >= saving.targetAmount ? "completed" : "active";
-    saving.updatedAt = getCurrentDateTime().datetime;
+    if (!walletId || !wallets.some((w) => String(w.id) === String(walletId))) {
+      showToast("Pilih dompet tujuan dulu", "error");
+      return;
+    }
 
-    // Record transaction history
-    if (!saving.history) saving.history = [];
-    saving.history.push({
-      type: "withdraw",
-      amount: amount,
-      note: note,
-      date: new Date().toISOString(),
-      previousAmount: saving.currentAmount + amount,
-      newAmount: saving.currentAmount,
+    busy = true;
+    let result;
+    try {
+      result = await saveSavingMovement({
+        savingId,
+        walletId: wallets.find((w) => String(w.id) === String(walletId)).id,
+        amount,
+        direction: "withdraw",
+        note,
+      });
+    } catch (err) {
+      console.error("Gagal mengambil tabungan:", err);
+      result = { ok: false, error: "exception" };
+    } finally {
+      busy = false;
+    }
+    if (!result.ok) {
+      showToast(savingMovementErrorMessage(result), "error");
+      return;
+    }
+
+    addAppNotification({
+      refKey: `saving_withdraw_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      title: "Tabungan diambil",
+      message: `Pemasukan sebesar ${formatCurrency(amount)}, diambil dari tabungan ${result.savingName}.`,
+      type: "success",
+      page: "savings",
     });
-
-    await updateItem(STORES.SAVINGS, saving);
+    window.dispatchEvent(new Event("money-manager-data-changed"));
 
     showToast(
-      `Berhasil mengambil ${formatCurrency(amount)} dari tabungan`,
+      `Berhasil mengambil ${formatCurrency(amount)} dari tabungan dan mencatat pemasukan`,
       "success",
     );
     modal.remove();

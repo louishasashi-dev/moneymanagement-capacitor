@@ -598,7 +598,7 @@ async function exportAssetsToImage(data) {
       return;
     }
 
-    // Ikon website untuk logo di header gambar (kembali ke "MM" bila gagal)
+    // Ikon website untuk logo di header gambar (kembali ke "H" bila gagal)
     const logoSrc = await getAppIconDataUrl();
 
     el = buildSimpleAssetsImageElement({ ...data, logoSrc });
@@ -831,10 +831,10 @@ function buildSimpleAssetsImageElement(data) {
             ${
               logoSrc
                 ? `<div class="simg-logo has-img"><img src="${logoSrc}" alt=""></div>`
-                : `<div class="simg-logo">MM</div>`
+                : `<div class="simg-logo">H</div>`
             }
             <div>
-              <div class="simg-app-name">Money Manager</div>
+              <div class="simg-app-name">Hylim</div>
               <div class="simg-app-sub">Ringkasan Total Aset</div>
             </div>
           </div>
@@ -887,7 +887,7 @@ function buildSimpleAssetsImageElement(data) {
           ${compRow("fa-hand-holding-usd", "#E6F6EC", "#16A34A", "Total Piutang", totalReceivables, rPct)}
         </div>
 
-        <div class="simg-footer">Money Manager — Ringkasan Total Aset</div>
+        <div class="simg-footer">Hylim — Ringkasan Total Aset</div>
       </div>
     </div>
   `;

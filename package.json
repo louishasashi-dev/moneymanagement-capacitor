@@ -2,7 +2,7 @@
   "name": "money-manager-capacitor",
   "version": "1.2.0",
   "private": true,
-  "description": "Money Manager PWA packaged as an Android app with Capacitor",
+  "description": "Hylim - Help Your Life In Money - PWA packaged as an Android app with Capacitor",
   "scripts": {
     "prepare:web": "node scripts/prepare-public.js",
     "build": "npm run prepare:web && vite build",

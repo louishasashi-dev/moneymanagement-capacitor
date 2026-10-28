@@ -1,4 +1,4 @@
-# 💰 Money Manager
+# Hylim - Help Your Life In Money
 
 Aplikasi manajemen keuangan harian berbasis web yang bisa digunakan secara **offline** dan diinstall sebagai aplikasi di Android.
 

@@ -51,6 +51,44 @@ async function createNotifIfNotExists(refKey, title, message, type, page) {
   });
 }
 
+// Tambah satu notifikasi dalam aplikasi (daftar Notifikasi + badge).
+// Dipanggil SETELAH operasi data berhasil disimpan. Tidak pernah melempar error:
+// gagal menampilkan notifikasi tidak boleh membatalkan/mengulang operasi keuangan.
+//   refKey  : kunci unik; dengan dedupe=true notifikasi dengan refKey sama tidak dibuat lagi
+export async function addAppNotification({
+  refKey,
+  title,
+  message,
+  type = "info",
+  page = "",
+  dedupe = false,
+}) {
+  try {
+    if (dedupe && refKey) {
+      const all = await getAllItems(STORES.NOTIFICATIONS);
+      if (all.some((n) => n.refKey === refKey)) return false;
+    }
+    await addItem(STORES.NOTIFICATIONS, {
+      refKey:
+        refKey ||
+        `app_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      title,
+      message,
+      type,
+      page,
+      isRead: false,
+      createdAt: new Date().toISOString(),
+    });
+    if (typeof window !== "undefined" && window.updateNotificationBadge) {
+      window.updateNotificationBadge();
+    }
+    return true;
+  } catch (error) {
+    console.error("Gagal membuat notifikasi:", error);
+    return false;
+  }
+}
+
 // Ambil semua notifikasi yang belum dibaca
 export async function getUnreadNotifications() {
   const all = await getAllItems(STORES.NOTIFICATIONS);

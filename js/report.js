@@ -612,14 +612,14 @@ async function exportToPDF() {
       doc.setTextColor(255, 255, 255);
       doc.setFontSize(8);
       doc.setFont("helvetica", "bold");
-      doc.text("MM", ML + 3.5, 16);
+      doc.text("H", ML + 4.8, 16);
     }
 
     // Nama app
     doc.setFontSize(16);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(255, 255, 255);
-    doc.text("Money Manager", ML + 16, 12);
+    doc.text("Hylim", ML + 16, 12);
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(180, 190, 210);
@@ -890,7 +890,7 @@ async function exportToPDF() {
       doc.setPage(i);
       doc.setFontSize(7);
       doc.setTextColor(150, 150, 170);
-      doc.text(`Money Manager — Laporan Keuangan Pribadi`, ML, 292);
+      doc.text(`Hylim — Laporan Keuangan Pribadi`, ML, 292);
       doc.text(`Halaman ${i} dari ${pageCount}`, W - MR, 292, {
         align: "right",
       });

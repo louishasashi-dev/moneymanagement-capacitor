@@ -20,6 +20,7 @@ import {
   parseMoney,
 } from "./utils.js";
 import { savePdf } from "./pdf-save.js";
+import { addAppNotification } from "./notifications.js";
 
 // State
 let allDebts = [];
@@ -38,6 +39,99 @@ function installmentPaid(debt, inst) {
   return (debt.payments || [])
     .filter((p) => p.installmentId === inst.id)
     .reduce((sum, p) => sum + (p.amount || 0), 0);
+}
+
+// ==================== NOTIFIKASI AKTIVITAS & PENGINGAT ====================
+// Semua notifikasi di bagian ini hanya dibuat SETELAH operasi datanya berhasil
+// disimpan, tidak pernah dari fungsi render, dan kegagalannya tidak memengaruhi
+// operasi keuangan (addAppNotification tidak melempar error).
+
+function notifyDebtActivity(kind, title, message) {
+  addAppNotification({
+    refKey: `debt_${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    title,
+    message,
+    type: "info",
+    page: "debts",
+  });
+}
+
+// Bunga hanya diberitahukan untuk UTANG (type "owe"): pihak pemberi pinjaman
+// menambahkan bunga ke tagihan pengguna. Dipanggil hanya setelah bunga tersimpan.
+function notifyInterestAdded(debt, accrued) {
+  if (!debt || debt.type !== "owe" || !(accrued > 0)) return;
+  notifyDebtActivity(
+    "interest",
+    "Bunga utang ditambahkan",
+    `${formatCurrency(accrued)} telah ditambahkan ke tagihan ${debt.partyName}, sebagai bunga, sesuai kesepakatan.`,
+  );
+}
+
+// Pengingat piutang overdue: tiap 7 hari selama masih ada sisa tagihan.
+// Hari overdue ke-1, 8, 15, ... dihitung dari jatuh tempo (angsuran belum lunas
+// yang paling awal bila piutang diangsur). Status disimpan di debt.lastOverdueReminder
+// = { due, period } supaya pemeriksaan berulang tidak mengirim ulang periode yang sama.
+const OVERDUE_REMINDER_INTERVAL_DAYS = 7;
+
+function daysBetweenISO(fromISO, toISO) {
+  const from = parseISODateOnly(fromISO);
+  const to = parseISODateOnly(toISO);
+  if (!from || !to) return NaN;
+  return Math.round((to - from) / 86400000);
+}
+
+// Jatuh tempo paling awal yang belum lunas (YYYY-MM-DD) atau null
+function earliestUnpaidDueDate(debt) {
+  const valid = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ""));
+  const hasInstallments =
+    debt.isInstallment === true &&
+    Array.isArray(debt.installments) &&
+    debt.installments.length > 0;
+  if (!hasInstallments) return valid(debt.dueDate) ? debt.dueDate : null;
+  const dues = debt.installments
+    .filter(
+      (inst) =>
+        valid(inst.dueDate) &&
+        Math.max(0, Number(inst.amount || 0) - installmentPaid(debt, inst)) > 0,
+    )
+    .map((inst) => inst.dueDate)
+    .sort();
+  return dues[0] || null;
+}
+
+async function checkOverdueReceivableReminders(debts, todayISO) {
+  for (const debt of debts) {
+    if (!debt || debt.type !== "debt") continue; // hanya piutang
+    if (debt.status === "completed" || debt.status === "cancelled") continue;
+    const remaining = Number(debt.remainingAmount ?? debt.amount ?? 0);
+    if (!(remaining > 0)) continue;
+
+    const dueISO = earliestUnpaidDueDate(debt);
+    if (!dueISO) continue;
+    const daysOverdue = daysBetweenISO(dueISO, todayISO);
+    if (!(daysOverdue >= 1)) continue;
+
+    const period = Math.floor((daysOverdue - 1) / OVERDUE_REMINDER_INTERVAL_DAYS);
+    const last = debt.lastOverdueReminder;
+    if (last && last.due === dueISO && last.period >= period) continue;
+
+    await addAppNotification({
+      refKey: `overdue_receivable_${debt.id}_${dueISO}_p${period}`,
+      title: "Piutang melewati jatuh tempo",
+      message: `${debt.partyName} masih memiliki tagihan sebesar ${formatCurrency(remaining)}, dan telah melewati batas waktu pembayaran selama ${daysOverdue} hari.`,
+      type: "warning",
+      page: "debts",
+      dedupe: true,
+    });
+    // Catat periode ini sudah ditangani (juga bila notifikasinya sudah ada)
+    // agar notifikasi yang dihapus pengguna tidak muncul lagi di periode yang sama.
+    debt.lastOverdueReminder = { due: dueISO, period, date: todayISO };
+    try {
+      await updateItem(STORES.DEBTS, debt);
+    } catch (error) {
+      console.error("Gagal menyimpan status pengingat overdue:", error);
+    }
+  }
 }
 
 // ==================== MEMBERI PINJAMAN (PIUTANG BARU) -> PENGELUARAN ====================
@@ -547,7 +641,14 @@ export async function runDebtInterestAccrual() {
     const result = accrueInterestForDebt(debt, todayISO);
     if (result.changed) {
       await updateItem(STORES.DEBTS, debt);
+      notifyInterestAdded(debt, result.accrued);
     }
+  }
+
+  try {
+    await checkOverdueReceivableReminders(debts, todayISO);
+  } catch (error) {
+    console.error("Gagal memeriksa pengingat piutang overdue:", error);
   }
 
   return debts;
@@ -573,7 +674,7 @@ export async function renderDebtsPage() {
                 <div class="debt-header-title">
                     <span class="debt-header-icon"><i class="fas fa-hand-holding-usd"></i></span>
                     <div>
-                        <span class="debt-eyebrow">Money Manager</span>
+                        <span class="debt-eyebrow">Hylim</span>
                         <h1>Hutang &amp; Piutang</h1>
                     </div>
                 </div>
@@ -1101,7 +1202,7 @@ async function showDebtModal(debtId = null) {
             <div class="modal-header dm-header">
                 <span class="dm-header-icon"><i class="fas ${isEdit ? "fa-pen" : "fa-plus"}"></i></span>
                 <div class="dm-header-text">
-                    <span class="dm-eyebrow">Money Manager</span>
+                    <span class="dm-eyebrow">Hylim</span>
                     <h3>${isEdit ? "Edit Piutang" : "Tambah Piutang Baru"}</h3>
                 </div>
                 <button type="button" class="modal-close-btn modal-close-x" aria-label="Tutup">&times;</button>
@@ -1510,12 +1611,24 @@ async function showDebtModal(debtId = null) {
           showToast(lendErrorMessage(result), "error");
           return;
         }
+        notifyDebtActivity(
+          "lend-new",
+          "Pinjaman baru dicatat",
+          `Pengeluaran sebesar ${formatCurrency(amount)} untuk memberi pinjaman ke ${partyName}.`,
+        );
         showToast(
           "Piutang ditambahkan dan dicatat sebagai pengeluaran",
           "success",
         );
       } else {
         await addItem(STORES.DEBTS, newDebt);
+        if (type === "owe") {
+          notifyDebtActivity(
+            "owe-new",
+            "Utang baru dicatat",
+            `Utang sebesar ${formatCurrency(amount)} dari ${partyName} berhasil dicatat.`,
+          );
+        }
         showToast("Data berhasil ditambahkan", "success");
       }
     }
@@ -1624,6 +1737,7 @@ async function showPaymentModal(debtId) {
   const accrualResult = accrueInterestForDebt(debt, todayISO);
   if (accrualResult.changed) {
     await updateItem(STORES.DEBTS, debt);
+    notifyInterestAdded(debt, accrualResult.accrued);
   }
 
   // ?? (bukan ||): sisa 0 = lunas, jangan jatuh kembali ke nominal awal
@@ -1943,6 +2057,15 @@ async function showPaymentModal(debtId) {
     }
 
     window.dispatchEvent(new Event("money-manager-data-changed"));
+    if (toTx) {
+      notifyDebtActivity(
+        isOwe ? "owe-pay" : "recv-pay",
+        isOwe ? "Pembayaran utang dicatat" : "Pembayaran piutang diterima",
+        isOwe
+          ? `Pengeluaran sebesar ${formatCurrency(amount)} untuk pembayaran utang kepada ${debt.partyName}.`
+          : `Pemasukan sebesar ${formatCurrency(amount)} dari pembayaran piutang ${debt.partyName}.`,
+      );
+    }
     showToast(
       toTx
         ? `Berhasil mencatat pembayaran ${formatCurrency(amount)} ke ${isOwe ? "pengeluaran" : "pemasukan"}`
@@ -1975,6 +2098,7 @@ async function showAddAmountModal(debtId) {
   const accrualResult = accrueInterestForDebt(debt, todayISO);
   if (accrualResult.changed) {
     await updateItem(STORES.DEBTS, debt);
+    notifyInterestAdded(debt, accrualResult.accrued);
   }
 
   const isOwe = debt.type === "owe";
@@ -2140,6 +2264,23 @@ async function showAddAmountModal(debtId) {
     } else {
       await updateItem(STORES.DEBTS, d);
     }
+
+    // Notifikasi hanya untuk penambahan yang tercatat (piutang -> pengeluaran) atau utang
+    if (lendSel) {
+      notifyDebtActivity(
+        "lend-add",
+        "Pinjaman ditambah",
+        `Pengeluaran sebesar ${formatCurrency(addAmount)} untuk menambah jumlah pinjaman ke ${d.partyName}.`,
+      );
+    } else if (isOwe) {
+      notifyDebtActivity(
+        "owe-add",
+        "Utang bertambah",
+        `Utang sebesar ${formatCurrency(addAmount)} telah ditambahkan ke tagihan ${d.partyName}.`,
+      );
+    }
+    // Perbarui jadwal notifikasi Android & tampilan lain yang bergantung pada data ini
+    window.dispatchEvent(new Event("money-manager-data-changed"));
 
     showToast(
       lendSel
@@ -2415,7 +2556,7 @@ async function printDebtReport(debtId) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(180, 190, 210);
-    doc.text("Money Manager", ML, 18);
+    doc.text("Hylim", ML, 18);
     doc.text(
       `Dicetak: ${getCurrentDateTime().datetime}   |   ID Data: ${debt.id}`,
       ML,

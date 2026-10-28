@@ -1,4 +1,4 @@
-const CACHE_NAME = "money-manager-v44";
+const CACHE_NAME = "hylim-v45";
 const BASE_URL = "/moneymanagement";
 
 const ASSETS = [

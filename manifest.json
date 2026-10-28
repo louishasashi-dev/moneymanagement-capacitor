@@ -1,6 +1,6 @@
 {
-  "name": "Money Manager - Manajemen Keuangan",
-  "short_name": "Money Manager",
+  "name": "Hylim - Help Your Life In Money",
+  "short_name": "Hylim",
   "description": "Aplikasi manajemen keuangan harian offline",
   "start_url": "/moneymanagement/",
   "scope": "/moneymanagement/",

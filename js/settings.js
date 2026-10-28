@@ -144,6 +144,17 @@ export async function renderSettingsPage() {
                     </div>
                     <i class="fas fa-tags"></i>
                 </div>
+                ${
+                  isNativeAndroid()
+                    ? `<div class="settings-item clickable" id="native-notif-item">
+                    <div class="item-info">
+                        <span class="item-title">Notifikasi Android</span>
+                        <span class="item-desc">Lihat jadwal pengingat dan kirim notifikasi uji</span>
+                    </div>
+                    <i class="fas fa-bell"></i>
+                </div>`
+                    : ""
+                }
                 <div class="settings-item clickable danger" id="reset-data-item">
                     <div class="item-info">
                         <span class="item-title">Reset Semua Data</span>
@@ -162,7 +173,7 @@ export async function renderSettingsPage() {
                 <div class="settings-item">
                     <div class="item-info">
                         <span class="item-title">Versi Aplikasi</span>
-                        <span class="item-desc">Money Manager v1.0.0</span>
+                        <span class="item-desc">Hylim v1.2.0</span>
                     </div>
                 </div>
                 <div class="settings-item">
@@ -337,6 +348,11 @@ function setupSettingsEventListeners() {
   if (manageCatItem) {
     manageCatItem.addEventListener("click", () => showManageCategoriesModal());
   }
+
+  // Notifikasi Android (hanya tampil di APK)
+  document
+    .getElementById("native-notif-item")
+    ?.addEventListener("click", () => showNativeNotificationModal());
 
   // Reset data
   const resetItem = document.getElementById("reset-data-item");
@@ -617,7 +633,7 @@ function setBackupFolderName(name) {
 
 function getBackupFilename() {
   // Nama file selalu tetap agar file lama tertimpa saat download ke folder yg sama
-  return "money_manager_backup.json";
+  return "hylim_backup.json";
 }
 
 function updateBackupFolderDesc() {
@@ -644,7 +660,7 @@ function showBackupFolderModal() {
       ">
         <strong style="color:var(--text-primary);">📱 Cara pakai di Android:</strong><br>
         1. Buka <em>File Manager</em> di HP kamu.<br>
-        2. Buat folder baru, misalnya <code>MoneyManagerBackup</code>.<br>
+        2. Buat folder baru, misalnya <code>HylimBackup</code>.<br>
         3. Ketik nama folder yang sama di kolom di atas (hanya sebagai label — tidak membuat folder otomatis).<br>
         4. Setiap kali backup, pindahkan file <strong>${getBackupFilename()}</strong> ke folder tersebut secara manual, atau biarkan di Downloads.<br>
         <br>
@@ -684,7 +700,7 @@ function showBackupFolderModal() {
             type="text"
             id="backup-folder-input"
             class="form-input"
-            placeholder="Contoh: MoneyManagerBackup atau D:\\BackupKeuangan"
+            placeholder="Contoh: HylimBackup atau D:\\BackupKeuangan"
             value="${escapeHtml(current)}"
           >
           <small style="color:var(--text-secondary);font-size:.75rem;display:block;margin-top:4px;">
@@ -941,7 +957,7 @@ async function exportToCSV() {
       .join("\n");
 
     const date = new Date();
-    const filename = `money_manager_transactions_${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}.csv`;
+    const filename = `hylim_transactions_${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}.csv`;
 
     // APK Android: WebView tidak menangani unduhan Blob, simpan lewat lembar Bagikan
     if (isNativeAndroid()) {
@@ -1242,6 +1258,108 @@ function addSettingsStyles() {
     `;
 
   document.head.appendChild(style);
+}
+
+// Modal status & uji notifikasi Android
+async function showNativeNotificationModal() {
+  document.getElementById("native-notif-modal")?.remove();
+
+  let mod;
+  try {
+    mod = await import("./native-notifications.js");
+  } catch (error) {
+    console.error(error);
+    showToast("Modul notifikasi tidak dapat dimuat", "error");
+    return;
+  }
+
+  const modal = document.createElement("div");
+  modal.id = "native-notif-modal";
+  modal.className = "modal-overlay";
+  modal.innerHTML = `
+    <div class="modal-container modal-small" style="max-width:460px;width:95%;max-height:85vh;overflow:auto;">
+      <div class="modal-header">
+        <h3><i class="fas fa-bell"></i> Notifikasi Android</h3>
+        <button class="modal-close-x" aria-label="Tutup" style="background:none;border:none;font-size:24px;cursor:pointer;color:var(--text-secondary);padding:0 8px;">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="native-notif-status" style="font-size:.85rem;margin-bottom:12px;"></div>
+        <div class="modal-buttons" style="margin-top:0;margin-bottom:12px;">
+          <button type="button" class="btn-primary" id="native-notif-test">Kirim notifikasi uji (5 detik)</button>
+          <button type="button" class="btn-secondary" id="native-notif-resync">Jadwalkan ulang</button>
+        </div>
+        <p style="font-size:.75rem;color:var(--text-secondary);margin-bottom:12px;">
+          Setelah menekan tombol uji, tutup aplikasi atau kunci layar dan tunggu beberapa detik.
+          Pengingat asli bisa tertunda beberapa menit oleh penghemat baterai Android.
+        </p>
+        <h4 style="margin-bottom:8px;font-size:.9rem;">Jadwal pengingat</h4>
+        <div id="native-notif-list"></div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  const statusEl = modal.querySelector("#native-notif-status");
+  const listEl = modal.querySelector("#native-notif-list");
+  const fmt = (d) =>
+    d
+      ? d.toLocaleString("id-ID", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+      : "-";
+
+  const refresh = async () => {
+    try {
+      const st = await mod.getNotificationStatus();
+      const perm =
+        st.permission === "granted"
+          ? "Diizinkan"
+          : st.permission === "denied"
+            ? "Ditolak (aktifkan di Pengaturan Android > Aplikasi > Hylim > Notifikasi)"
+            : "Belum diminta";
+      statusEl.innerHTML = `Izin notifikasi: <strong>${escapeHtml(perm)}</strong><br>Terjadwal: <strong>${st.pending.length}</strong> pengingat`;
+      listEl.innerHTML = st.pending.length
+        ? st.pending
+            .map(
+              (n) => `<div style="padding:8px 0;border-bottom:1px solid var(--border-color);">
+                <div style="font-size:.85rem;font-weight:500;">${escapeHtml(n.title)}</div>
+                <div style="font-size:.75rem;color:var(--text-secondary);">${escapeHtml(fmt(n.at))}</div>
+              </div>`,
+            )
+            .join("")
+        : `<p style="color:var(--text-secondary);font-size:.85rem;">Belum ada pengingat terjadwal.</p>`;
+    } catch (error) {
+      console.error(error);
+      statusEl.textContent = "Gagal membaca status notifikasi.";
+    }
+  };
+
+  modal.querySelector("#native-notif-test").addEventListener("click", async () => {
+    try {
+      const ok = await mod.sendTestNotification(5);
+      showToast(
+        ok
+          ? "Notifikasi uji dijadwalkan. Tunggu 5 detik."
+          : "Izin notifikasi ditolak",
+        ok ? "success" : "error",
+      );
+    } catch (error) {
+      console.error(error);
+      showToast("Gagal mengirim notifikasi uji", "error");
+    }
+    refresh();
+  });
+  modal.querySelector("#native-notif-resync").addEventListener("click", async () => {
+    await mod.initializeNativeNotifications();
+    showToast("Jadwal notifikasi diperbarui", "success");
+    refresh();
+  });
+
+  const close = () => modal.remove();
+  modal.querySelector(".modal-close-x").addEventListener("click", close);
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) close();
+  });
+
+  refresh();
 }
 
 // Modal kelola kategori

@@ -2,10 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
 
-// Ikon sumber: gambar yang sudah ada di images/icons (tanpa desain baru, hanya resize).
-const SOURCE = path.resolve("images/icons/icon-512x512.png");
-// Warna latar adaptive icon = warna tepi ikon sumber (#1C213E) agar menyatu.
-const BACKGROUND = "#1C213E";
+// Ikon sumber: gambar siap pakai di images/android-icon (tanpa desain baru, hanya resize).
+const ICON_DIR = path.resolve("images/android-icon");
+const SOURCE = path.join(ICON_DIR, "launchericon-512x512.png");
+// Warna latar = warna tepi ikon sumber (putih) agar adaptive icon menyatu.
+const BACKGROUND = "#FEFEFE";
+// Adaptive icon dipotong sesuai bentuk launcher (lingkaran paling ketat). Logo diperkecil
+// ke area aman agar tidak terpotong (titik terjauh logo ~218px dari pusat pada 512px;
+// area terlihat berjari-jari 36/108 x 512 = 171px, jadi skala = 0.78). Desain tidak diubah.
+const SAFE_SCALE = 0.78;
 
 const resDir = path.resolve("android/app/src/main/res");
 if (!fs.existsSync(resDir)) {
@@ -26,22 +31,41 @@ const densities = {
 
 const resize = (size) => sharp(SOURCE).resize(size, size, { kernel: "lanczos3" });
 
+// Logo diperkecil di tengah kanvas berlatar BACKGROUND
+async function paddedIcon(size) {
+  const inner = Math.round(size * SAFE_SCALE);
+  const logo = await resize(inner).png().toBuffer();
+  return sharp({
+    create: { width: size, height: size, channels: 3, background: BACKGROUND },
+  }).composite([{ input: logo, gravity: "center" }]);
+}
+
 for (const [density, size] of Object.entries(densities)) {
   const dir = path.join(resDir, `mipmap-${density}`);
   fs.mkdirSync(dir, { recursive: true });
 
-  // Launcher legacy (Android < 8) - persegi dan bulat.
-  await resize(size.launcher).png().toFile(path.join(dir, "ic_launcher.png"));
+  // Launcher legacy (Android < 8), persegi: pakai file bawaan bila ukurannya persis sama.
+  const provided = path.join(ICON_DIR, `launchericon-${size.launcher}x${size.launcher}.png`);
+  if (fs.existsSync(provided)) {
+    fs.copyFileSync(provided, path.join(dir, "ic_launcher.png"));
+  } else {
+    await resize(size.launcher).png().toFile(path.join(dir, "ic_launcher.png"));
+  }
+
+  // Launcher legacy bulat: logo di area aman, dipotong lingkaran
   const mask = Buffer.from(
     `<svg width="${size.launcher}" height="${size.launcher}"><circle cx="${size.launcher / 2}" cy="${size.launcher / 2}" r="${size.launcher / 2}"/></svg>`
   );
-  await resize(size.launcher)
+  const round = await paddedIcon(size.launcher);
+  await round
+    .ensureAlpha()
     .composite([{ input: mask, blend: "dest-in" }])
     .png()
     .toFile(path.join(dir, "ic_launcher_round.png"));
 
-  // Layer foreground adaptive icon (Android 8+): ikon sumber utuh, hanya di-resize.
-  await resize(size.foreground).png().toFile(path.join(dir, "ic_launcher_foreground.png"));
+  // Layer foreground adaptive icon (Android 8+)
+  const fg = await paddedIcon(size.foreground);
+  await fg.png().toFile(path.join(dir, "ic_launcher_foreground.png"));
 }
 
 // Warna latar adaptive icon (nama sendiri agar tidak bentrok dengan template Capacitor).
@@ -68,4 +92,4 @@ fs.mkdirSync(anydpi, { recursive: true });
 fs.writeFileSync(path.join(anydpi, "ic_launcher.xml"), adaptive, "utf8");
 fs.writeFileSync(path.join(anydpi, "ic_launcher_round.xml"), adaptive, "utf8");
 
-console.log("Prepared Android launcher icons from images/icons/icon-512x512.png.");
+console.log("Prepared Android launcher icons from images/android-icon/launchericon-512x512.png.");

@@ -528,7 +528,7 @@ export function drawReport(doc, table, report) {
   doc.setProperties({
     title: "Laporan Simulasi Alokasi Keuangan",
     subject: "Simulasi alokasi keuangan",
-    creator: "Money Manager",
+    creator: "Hylim",
   });
 
   // ── Header
@@ -540,7 +540,7 @@ export function drawReport(doc, table, report) {
   doc.text("Laporan Simulasi Alokasi Keuangan", M, 16);
   font("normal", 9.5, [208, 212, 235]);
   doc.text(`Dibuat pada ${report.generatedAt}`, M, 24.5);
-  doc.text("Money Manager", W - M, 24.5, { align: "right" });
+  doc.text("Hylim", W - M, 24.5, { align: "right" });
   y = 46;
 
   // ── Ringkasan (kartu 2 x 2)
@@ -737,7 +737,7 @@ export function drawReport(doc, table, report) {
     doc.setLineWidth(0.3);
     doc.line(M, H - 16, W - M, H - 16);
     font("normal", 8, PDF.muted);
-    doc.text("Money Manager - Simulasi Alokasi Keuangan", M, H - 10.5);
+    doc.text("Hylim - Simulasi Alokasi Keuangan", M, H - 10.5);
     doc.text(`Halaman ${i} dari ${pages}`, W - M, H - 10.5, { align: "right" });
   }
 }
