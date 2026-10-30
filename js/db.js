@@ -425,31 +425,40 @@ export async function importAllData(backupData) {
     }
   }
 
-  // Clear existing data dulu
-  for (const storeName of Object.values(STORES)) {
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction([storeName], "readwrite");
-      tx.objectStore(storeName).clear();
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  // Import new data
-  for (const [storeName, items] of Object.entries(backupData)) {
-    if (!items || items.length === 0) continue;
-    if (!Object.values(STORES).includes(storeName)) continue;
-
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction([storeName], "readwrite");
-      const store = tx.objectStore(storeName);
-      for (const item of items) {
-        store.put(item);
+  // Hapus + isi dalam SATU transaksi IndexedDB lintas store: atomik. Jika ada
+  // item yang gagal ditulis (mis. key hilang/duplikat), seluruh transaksi
+  // dibatalkan dan data lama tetap utuh (tidak ada kondisi setengah terhapus).
+  const allStores = Object.values(STORES).filter((n) =>
+    db.objectStoreNames.contains(n),
+  );
+  await new Promise((resolve, reject) => {
+    let tx;
+    try {
+      tx = db.transaction(allStores, "readwrite");
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error("Restore dibatalkan"));
+    try {
+      for (const storeName of allStores) tx.objectStore(storeName).clear();
+      for (const [storeName, items] of Object.entries(backupData)) {
+        if (!allStores.includes(storeName)) continue;
+        const store = tx.objectStore(storeName);
+        for (const item of items) store.put(item);
       }
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
+    } catch (error) {
+      // put/clear melempar langsung (mis. DataError): batalkan semuanya
+      try {
+        tx.abort();
+      } catch (_) {
+        /* sudah selesai/abort */
+      }
+      reject(error);
+    }
+  });
 
   return true;
 }

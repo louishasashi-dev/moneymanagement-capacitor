@@ -131,3 +131,45 @@ export async function saveTextFile(text, filename, title = "Simpan atau bagikan 
     throw error;
   }
 }
+
+// ── Simpan langsung ke folder Download/Hylim (Android 10+) ───────────────────
+// Memakai plugin native kecil "DownloadSaver" (disisipkan saat build oleh
+// scripts/prepare-android.js) yang menulis lewat MediaStore: resmi, tanpa izin
+// tambahan, dan file langsung terlihat di aplikasi File bawaan Android.
+let downloadSaverPlugin = null;
+async function getDownloadSaver() {
+  if (!downloadSaverPlugin) {
+    const { registerPlugin } = await import("@capacitor/core");
+    downloadSaverPlugin = registerPlugin("DownloadSaver");
+  }
+  return downloadSaverPlugin;
+}
+
+function textToBase64(text) {
+  return arrayBufferToBase64(new TextEncoder().encode(text).buffer);
+}
+
+// Mengembalikan { status: "downloaded", path } jika tersimpan di Download/Hylim,
+// atau { status: "shared" | "cancelled" } jika terpaksa memakai lembar Bagikan
+// (Android < 10 atau plugin tidak tersedia). Melempar Error hanya jika keduanya gagal.
+export async function saveTextToDownloads(
+  text,
+  filename,
+  mimeType = "application/json",
+  shareTitle = "Simpan atau bagikan file",
+) {
+  if (!text) throw new Error("File kosong");
+  try {
+    const saver = await getDownloadSaver();
+    const result = await saver.saveFile({
+      filename,
+      data: textToBase64(text),
+      mimeType,
+      folder: "Hylim",
+    });
+    return { status: "downloaded", path: result?.path || `Download/Hylim/${filename}` };
+  } catch (error) {
+    console.warn("Simpan ke Download gagal, memakai lembar Bagikan:", error);
+    return { status: await saveTextFile(text, filename, shareTitle) };
+  }
+}

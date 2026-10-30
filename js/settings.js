@@ -20,7 +20,11 @@ import {
   escapeAttr,
   safeImageSrc,
 } from "./utils.js";
-import { isNativeAndroid, saveTextFile } from "./pdf-save.js";
+import {
+  isNativeAndroid,
+  saveTextFile,
+  saveTextToDownloads,
+} from "./pdf-save.js";
 
 // State
 let currentSettings = {};
@@ -116,6 +120,17 @@ export async function renderSettingsPage() {
                     </div>
                     <i class="fas fa-download"></i>
                 </div>
+                ${
+                  isNativeAndroid()
+                    ? `<div class="settings-item clickable" id="backup-share-item">
+                    <div class="item-info">
+                        <span class="item-title">Bagikan Backup</span>
+                        <span class="item-desc">Kirim file backup ke WhatsApp, Drive, dll</span>
+                    </div>
+                    <i class="fas fa-share-nodes"></i>
+                </div>`
+                    : ""
+                }
                 <div class="settings-item clickable" id="backup-folder-item">
                     <div class="item-info">
                         <span class="item-title">Folder Backup</span>
@@ -315,6 +330,11 @@ function setupSettingsEventListeners() {
   }
 
   // Backup data
+  const backupShareItem = document.getElementById("backup-share-item");
+  if (backupShareItem) {
+    backupShareItem.addEventListener("click", () => shareBackupData());
+  }
+
   const backupItem = document.getElementById("backup-data-item");
   if (backupItem) {
     backupItem.addEventListener("click", () => backupData());
@@ -735,6 +755,23 @@ function showBackupFolderModal() {
 
 // ─── backupData (nama file tetap, dengan info folder) ────────────────────────
 
+// Android: kirim backup lewat lembar Bagikan (tanpa menyimpan ke Download)
+async function shareBackupData() {
+  showToast("Menyiapkan backup...", "info");
+  try {
+    const data = await exportAllData();
+    const result = await saveTextFile(
+      JSON.stringify(data, null, 2),
+      getBackupFilename(),
+      "Bagikan file backup",
+    );
+    if (result !== "cancelled") showToast("Backup siap dibagikan!", "success");
+  } catch (error) {
+    console.error("Bagikan backup gagal:", error);
+    showToast("Gagal membagikan backup", "error");
+  }
+}
+
 async function backupData() {
   showToast("Menyiapkan backup...", "info");
 
@@ -749,12 +786,17 @@ async function backupData() {
 
     // APK Android: WebView tidak menangani unduhan Blob, simpan lewat lembar Bagikan
     if (isNativeAndroid()) {
-      const result = await saveTextFile(
+      const result = await saveTextToDownloads(
         jsonStr,
         filename,
+        "application/json",
         "Simpan file backup (Drive, File, dll)",
       );
-      if (result !== "cancelled") showToast("Backup siap disimpan!", "success");
+      if (result.status === "downloaded") {
+        showToast(`Backup tersimpan di ${result.path}`, "success");
+      } else if (result.status !== "cancelled") {
+        showToast("Backup siap disimpan!", "success");
+      }
       return;
     }
 
@@ -899,7 +941,17 @@ async function restoreData(file) {
           const text = await file.text();
           const data = JSON.parse(text);
           if (!isValidBackupData(data)) throw new Error("Struktur backup tidak valid");
-          await importAllData(data);
+          try {
+            await importAllData(data);
+          } catch (importError) {
+            // Transaksi atomik dibatalkan: data lama masih utuh
+            console.error("Restore gagal ditulis:", importError);
+            showToast(
+              "Restore gagal. Data kamu yang sekarang tidak berubah.",
+              "error",
+            );
+            return;
+          }
 
           showToast("Restore berhasil! Aplikasi akan dimuat ulang.", "success");
 
@@ -961,13 +1013,17 @@ async function exportToCSV() {
 
     // APK Android: WebView tidak menangani unduhan Blob, simpan lewat lembar Bagikan
     if (isNativeAndroid()) {
-      const result = await saveTextFile(
+      const result = await saveTextToDownloads(
         "\uFEFF" + csvContent,
         filename,
+        "text/csv",
         "Simpan file CSV",
       );
-      if (result !== "cancelled")
+      if (result.status === "downloaded") {
+        showToast(`CSV tersimpan di ${result.path}`, "success");
+      } else if (result.status !== "cancelled") {
         showToast(`Export ${transactions.length} transaksi berhasil!`, "success");
+      }
       return;
     }
 
