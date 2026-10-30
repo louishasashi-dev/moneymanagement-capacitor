@@ -1,6 +1,6 @@
 // Planned Transactions Module
 // Rencana transaksi yang belum dikonfirmasi masuk ke transaksi aktual
-// Reset otomatis SELURUH data (pending + confirmed) setiap tanggal 1 awal bulan
+// Tidak ada reset otomatis: rencana tetap tersimpan sampai pengguna menghapus/mereset manual
 
 import {
   addItem,
@@ -10,6 +10,7 @@ import {
   getItem,
   STORES,
 } from "./db.js";
+import { addAppNotification } from "./notifications.js";
 import {
   formatCurrency,
   formatDate,
@@ -219,42 +220,7 @@ function summarizePlan(items) {
 }
 
 // ───────────────────────────────────────────────
-// Auto-reset logic: hapus SELURUH data (pending + confirmed)
-// setiap tanggal 1 awal bulan
-// ───────────────────────────────────────────────
-export async function checkAndAutoReset() {
-  const today = new Date();
-  const day = today.getDate();
-  const resetKey = `planned_reset_${today.getFullYear()}_${today.getMonth()}`;
-
-  const alreadyReset = localStorage.getItem(resetKey);
-  if (alreadyReset) return;
-
-  if (day === 1) {
-    const items = await plannedGetAll();
-    if (items.length > 0) {
-      await plannedClearAll();
-      localStorage.setItem(resetKey, "1");
-
-      // Buat notifikasi
-      await addItem(STORES.NOTIFICATIONS, {
-        refKey: `planned_auto_reset_${resetKey}`,
-        title: "🔄 Rencana Transaksi Direset",
-        message:
-          "Semua rencana transaksi (menunggu & yang sudah dikonfirmasi) telah direset otomatis di awal bulan ini.",
-        type: "info",
-        page: "planned",
-        isRead: false,
-        createdAt: new Date().toISOString(),
-      });
-    } else {
-      localStorage.setItem(resetKey, "1");
-    }
-  }
-}
-
-// ───────────────────────────────────────────────
-// Cek apakah 2-3 hari sebelum reset (akhir bulan), kirim notif
+// Cek apakah 2-3 hari sebelum akhir bulan, ingatkan rencana yang belum dikonfirmasi
 // ───────────────────────────────────────────────
 export async function checkPlannedReminder() {
   const today = new Date();
@@ -270,8 +236,6 @@ export async function checkPlannedReminder() {
   const pending = items.filter((i) => i.status === "pending");
   if (pending.length === 0) return;
 
-  const nextMonthFirst = new Date(year, month + 1, 1);
-  const daysLeft = Math.ceil((nextMonthFirst - today) / (1000 * 60 * 60 * 24));
   const refKey = `planned_reminder_${year}_${month}_${day}`;
 
   const all = await getAllItems(STORES.NOTIFICATIONS);
@@ -281,7 +245,7 @@ export async function checkPlannedReminder() {
   await addItem(STORES.NOTIFICATIONS, {
     refKey,
     title: "⚠️ Rencana Transaksi Belum Dikonfirmasi",
-    message: `Anda mempunyai ${pending.length} rencana transaksi yang belum dikonfirmasi. Mohon dicek! Reset otomatis awal bulan dalam ${daysLeft} hari.`,
+    message: `Anda mempunyai ${pending.length} rencana transaksi yang belum dikonfirmasi. Mohon dicek sebelum bulan berganti.`,
     type: "warning",
     page: "planned",
     isRead: false,
@@ -292,8 +256,7 @@ export async function checkPlannedReminder() {
 }
 
 // ───────────────────────────────────────────────
-// Reset manual: user bisa reset kapan saja tanpa
-// menunggu tanggal 1 awal bulan
+// Reset manual: user bisa reset kapan saja (satu-satunya cara reset)
 // ───────────────────────────────────────────────
 async function manualResetPlanned() {
   // Multi-plan: reset manual hanya berlaku untuk plan yang sedang dibuka.
@@ -312,13 +275,6 @@ async function manualResetPlanned() {
 
   await plannedDeleteByPlan(currentPlanId);
 
-  // Tandai bulan berjalan sudah direset, agar auto-reset tanggal 1
-  // tidak dobel-notifikasi kalau reset manual ini kebetulan dilakukan
-  // di tanggal 1 juga
-  const today = new Date();
-  const resetKey = `planned_reset_${today.getFullYear()}_${today.getMonth()}`;
-  localStorage.setItem(resetKey, "1");
-
   showToast("Rencana transaksi berhasil direset", "success");
   await renderPlannedView();
 }
@@ -326,10 +282,38 @@ async function manualResetPlanned() {
 // ───────────────────────────────────────────────
 // Konfirmasi: masukkan ke transaksi aktual
 // ───────────────────────────────────────────────
+// Notifikasi (daftar dalam aplikasi + bilah notifikasi Android) setelah konfirmasi
+// berhasil disimpan. refKey unik per rencana + dedupe => satu konfirmasi, satu notifikasi.
+function notifyPlannedConfirmed(item) {
+  addAppNotification({
+    refKey: `planned_confirmed_${item.id}`,
+    title: "Rencana transaksi dikonfirmasi",
+    message: `${item.itemName || "Rencana"} (${formatCurrency(item.amount)}) berhasil dikonfirmasi dan dicatat sebagai transaksi.`,
+    type: "success",
+    page: "planned",
+    dedupe: true,
+  });
+}
+
+// Kunci anti ketuk ganda: satu rencana hanya diproses sekali pada satu waktu
+const confirmingIds = new Set();
+
 async function confirmPlanned(id) {
+  if (confirmingIds.has(id)) return;
+  confirmingIds.add(id);
+  try {
+    await confirmPlannedUnlocked(id);
+  } finally {
+    confirmingIds.delete(id);
+  }
+}
+
+async function confirmPlannedUnlocked(id) {
   const items = await plannedGetAll();
   const item = items.find((i) => i.id === id);
   if (!item) return;
+  // Sudah dikonfirmasi (mis. ketuk dobel): jangan proses/notifikasi lagi
+  if (item.status === "confirmed") return;
 
   if (isMultiPlanned(item)) {
     await confirmPlannedMulti(item);
@@ -420,6 +404,7 @@ async function confirmPlanned(id) {
   await plannedUpdate(item);
   // Transaksi baru tercatat: perbarui jadwal pengingat Android.
   window.dispatchEvent(new Event("money-manager-data-changed"));
+  notifyPlannedConfirmed(item);
 
   showToast("Transaksi berhasil dikonfirmasi dan disimpan!", "success");
   await renderPlannedView();
@@ -476,6 +461,7 @@ async function confirmPlannedMulti(item) {
 
   item.status = "confirmed";
   await plannedUpdate(item);
+  notifyPlannedConfirmed(item);
 
   showToast("Transaksi berhasil dikonfirmasi dan disimpan!", "success");
   await renderPlannedView();
@@ -488,7 +474,6 @@ export async function renderPlannedPage() {
   const container = document.getElementById("page-content");
   if (!container) return;
 
-  await checkAndAutoReset();
   await checkPlannedReminder();
 
   // Masuk dari menu sidebar/bottom-nav selalu mulai dari daftar plan.
@@ -1147,16 +1132,6 @@ async function renderPlanDetail() {
   const allItems = [...pending, ...confirmed];
   const wallets = await getAllItems(STORES.WALLETS);
 
-  // Hitung info reset berikutnya
-  const today = new Date();
-  const day = today.getDate();
-  const nextMonthFirst = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-  const daysToReset = Math.ceil(
-    (nextMonthFirst - today) / (1000 * 60 * 60 * 24),
-  );
-
-  const urgentClass = daysToReset <= 3 ? "urgent" : "";
-
   const desktopHtml = `
     <div class="transactions-container">
       <div class="page-header">
@@ -1174,35 +1149,6 @@ async function renderPlanDetail() {
           <button class="btn-primary" id="add-planned-btn">
             <i class="fas fa-plus"></i> Rencana Baru
           </button>
-        </div>
-      </div>
-
-      <!-- Info reset -->
-      <div class="card planned-info-card ${urgentClass}" style="
-        padding: 14px 18px;
-        background: ${daysToReset <= 3 ? "var(--warning-bg, #fffbeb)" : "var(--bg-secondary)"};
-        border-left: 4px solid ${daysToReset <= 3 ? "#f59e0b" : "var(--primary, #6366f1)"};
-        margin-bottom: 16px;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      ">
-        <i class="fas ${daysToReset <= 3 ? "fa-exclamation-triangle" : "fa-info-circle"}" style="
-          font-size: 1.3rem;
-          color: ${daysToReset <= 3 ? "#f59e0b" : "var(--primary, #6366f1)"};
-        "></i>
-        <div>
-          <div style="font-weight:600;font-size:.9rem;">
-            Reset otomatis setiap tanggal 1 awal bulan
-          </div>
-          <div style="font-size:.8rem;color:var(--text-secondary);">
-            ${
-              daysToReset <= 3
-                ? `⚠️ Hanya ${daysToReset} hari lagi! Konfirmasi rencana transaksimu sebelum direset.`
-                : `${daysToReset} hari lagi hingga reset berikutnya.`
-            }
-            Seluruh rencana transaksi (menunggu maupun yang sudah dikonfirmasi) akan direset otomatis setiap tanggal 1.
-          </div>
         </div>
       </div>
 
@@ -1336,12 +1282,6 @@ async function renderPlanDetail() {
     (a, i) => a + (i.type === "income" ? i.amount : -i.amount),
     0,
   );
-  const pdInfoText =
-    (daysToReset <= 3
-      ? `⚠️ Hanya ${daysToReset} hari lagi! Konfirmasi rencana transaksimu sebelum direset. `
-      : `${daysToReset} hari lagi hingga reset berikutnya. `) +
-    "Seluruh rencana transaksi (menunggu maupun yang sudah dikonfirmasi) akan direset otomatis setiap tanggal 1.";
-
   const mobileHtml = `
     <div class="pd-mobile">
       <header class="pd-hero">
@@ -1355,7 +1295,6 @@ async function renderPlanDetail() {
           <button type="button" class="pd-btn pd-btn-primary pd-add"><i class="fas fa-plus"></i><span>Rencana Baru</span></button>
           <button type="button" class="pd-btn pd-btn-ghost pd-add-multi"><i class="fas fa-cart-shopping"></i><span>Rencana Banyak</span></button>
         </div>
-        <p class="pd-info ${daysToReset <= 3 ? "urgent" : ""}">${pdInfoText}</p>
       </header>
 
       <section class="pd-summary">

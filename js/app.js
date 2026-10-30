@@ -22,7 +22,7 @@ import {
   getUnreadNotifications,
 } from "./notifications.js";
 
-import { checkAndAutoReset, checkPlannedReminder } from "./planned.js";
+import { checkPlannedReminder } from "./planned.js";
 import { runDebtInterestAccrual } from "./debt.js";
 
 // App State
@@ -53,7 +53,12 @@ async function initializeNativeNotificationSupport() {
 // Make navigateTo available globally
 
 window.navigateTo = navigateTo;
-window.renderDashboard = renderDashboard;
+// Modul lain (transaksi, dompet) memanggil ini setelah menyimpan data dan hasilnya
+// menampilkan Dashboard: menu aktif harus ikut pindah ke Dashboard.
+window.renderDashboard = async (...args) => {
+  updateActiveNav("dashboard");
+  return renderDashboard(...args);
+};
 window.getCurrentPage = () => currentPage;
 
 // Data transaksi/utang berubah: perbarui jadwal notifikasi Android.
@@ -120,9 +125,7 @@ async function initApp() {
 
     await cleanOldNotifications();
 
-    // Cek auto-reset dan reminder rencana transaksi
-
-    await checkAndAutoReset();
+    // Cek reminder rencana transaksi
 
     await checkPlannedReminder();
 
@@ -268,10 +271,9 @@ function setupNavigation() {
 
 // Navigate to Page
 
-async function navigateTo(page) {
+// Samakan penanda menu aktif (sidebar + bottom bar) dengan halaman yang sedang tampil
+function updateActiveNav(page) {
   currentPage = page;
-
-  // Update active states
 
   document.querySelectorAll(".nav-item, .bottom-nav-item").forEach((item) => {
     if (item.dataset.page === page) {
@@ -280,6 +282,11 @@ async function navigateTo(page) {
       item.classList.remove("active");
     }
   });
+}
+
+async function navigateTo(page) {
+  // Update active states
+  updateActiveNav(page);
 
   // Close mobile sidebar if open
 
