@@ -136,13 +136,25 @@ export async function saveTextFile(text, filename, title = "Simpan atau bagikan 
 // Memakai plugin native kecil "DownloadSaver" (disisipkan saat build oleh
 // scripts/prepare-android.js) yang menulis lewat MediaStore: resmi, tanpa izin
 // tambahan, dan file langsung terlihat di aplikasi File bawaan Android.
-let downloadSaverPlugin = null;
+let downloadSaverHolder = null;
+// PENTING: proxy plugin Capacitor menganggap SETIAP properti (termasuk "then") sebagai
+// method native. Jika proxy dikembalikan langsung dari fungsi async, JavaScript memanggil
+// proxy.then() dan promise menggantung selamanya. Karena itu proxy dibungkus objek.
 async function getDownloadSaver() {
-  if (!downloadSaverPlugin) {
+  if (!downloadSaverHolder) {
     const { registerPlugin } = await import("@capacitor/core");
-    downloadSaverPlugin = registerPlugin("DownloadSaver");
+    downloadSaverHolder = { saver: registerPlugin("DownloadSaver") };
   }
-  return downloadSaverPlugin;
+  return downloadSaverHolder;
+}
+
+// Batas waktu supaya panggilan native yang macet tidak membuat backup menggantung.
+function withTimeout(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function textToBase64(text) {
@@ -160,13 +172,17 @@ export async function saveTextToDownloads(
 ) {
   if (!text) throw new Error("File kosong");
   try {
-    const saver = await getDownloadSaver();
-    const result = await saver.saveFile({
-      filename,
-      data: textToBase64(text),
-      mimeType,
-      folder: "Hylim",
-    });
+    const { saver } = await getDownloadSaver();
+    const result = await withTimeout(
+      saver.saveFile({
+        filename,
+        data: textToBase64(text),
+        mimeType,
+        folder: "Hylim",
+      }),
+      15000,
+      "Penyimpanan ke Download tidak merespons",
+    );
     return { status: "downloaded", path: result?.path || `Download/Hylim/${filename}` };
   } catch (error) {
     console.warn("Simpan ke Download gagal, memakai lembar Bagikan:", error);
